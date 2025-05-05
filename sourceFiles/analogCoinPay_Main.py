@@ -1,4 +1,4 @@
-VERSION = "SP2_V0.01a"
+VERSION = "SP2_V0.0505a"
 
 import machine
 import binascii
@@ -370,7 +370,6 @@ class analogClawData:
         self.Number_of_Free_Payment = 0         # for 三、帳目查詢\遠端帳目\悠遊卡贈送次數
         self.Number_of_Coin = 0                 # for 三、帳目查詢\遠端帳目\投幣次數
         self.Number_of_Award = 0                # for 三、帳目查詢\遠端帳目、投幣帳目\禮品出獎次數
-
         self.Error_Code_of_Machine = 99         # for 機台故障代碼表
 
 
@@ -381,18 +380,17 @@ claw_check_timer_counter = 0
 def three_timer_task():
     while True:
         try:
-            GPO_IO23test.value(1)
-            # print('3Ta開機秒數:', utime.ticks_ms() / 1000)
-
             global claw_check_timer_counter
             claw_check_timer_counter = (claw_check_timer_counter + 1) % claw_check_timer_period
             if claw_check_timer_counter == 0:
-                claw_check_timer_callback()
+                claw_check_timer_callback()                
+            if Rounds_of_Starting_games > 0:
+                GPIO_Send_Starting_games()
+
             LCD_update_timer_callback()
+
             server_check_timer_callback()
-        
-            GPO_IO23test.value(0)
-            # print('3Tb開機秒數:', utime.ticks_ms() / 1000)
+
         except OSError as e:
             print("3t error:", e)
         utime.sleep_ms(1000)                         # 休眠一小段時間，避免過度使用CPU資源
@@ -490,33 +488,21 @@ def server_report_timer_callback(timer):
     server_report_counter = (server_report_counter + 1) % server_report_period
     if server_report_counter == 0:
         server_report_flag = 1
-        
-GPO_IO21test = machine.Pin(21, machine.Pin.OUT)
-GPO_IO21test.value(0)
-utime.sleep_ms(100)
-IO21value = 1
-GPO_IO21test.value(IO21value)
 
-GPO_IO23test = machine.Pin(23, machine.Pin.OUT)
-GPO_IO23test.value(0)
-utime.sleep_ms(100)
-IO23value = 1
-GPO_IO23test.value(1)
-utime.sleep_ms(100)
-GPO_IO23test.value(0)
 
 # 定義GPI中斷處理函式
 PAYOUT_falling_time = utime.ticks_ms()
 PAYOUT_last_rising_time = utime.ticks_ms()
+Coin_IN1_falling_time = utime.ticks_ms()
+Coin_IN1_last_rising_time = utime.ticks_ms()
+Coin_IN2_falling_time = utime.ticks_ms()
+Coin_IN2_last_rising_time = utime.ticks_ms()
 def GPI_interrupt_handler(pin):
-    global PAYOUT_falling_time, PAYOUT_last_rising_time, IO21value
-    IO21value = not IO21value
-    GPO_IO21test.value(IO21value)
     
-    PAYOUT_value = GPIO_CardReader_PAYOUT.value()
-    PAYOUT_now_time = utime.ticks_ms()
-#    print('PAYOUT_start_time(ms):', PAYOUT_now_time)
     if pin == GPIO_CardReader_PAYOUT :
+        global PAYOUT_falling_time, PAYOUT_last_rising_time
+        PAYOUT_value = GPIO_CardReader_PAYOUT.value()
+        PAYOUT_now_time = utime.ticks_ms()
         print("PAYOUT收到中斷:", PAYOUT_value)
         if PAYOUT_value == 0 :
             PAYOUT_falling_time = PAYOUT_now_time
@@ -526,12 +512,55 @@ def GPI_interrupt_handler(pin):
             PAYOUT_lowpulse_time = PAYOUT_rising_time - PAYOUT_falling_time
             print("中斷PAYOUT收到Hi Pulse，寬度(ms):", PAYOUT_hipulse_time, ",和Low Pulse，寬度(ms):", PAYOUT_lowpulse_time)
             if PAYOUT_hipulse_time >= 100 and (50 <= PAYOUT_lowpulse_time and PAYOUT_lowpulse_time <=200) :
-                print("Pulse的Hi和Lo寬度都正確，啟動娃娃機遊戲")
-                uart_FEILOLI_send_packet(KindFEILOLIcmd.Send_Starting_once_game)   
+                # print("Pulse的Hi和Lo寬度都正確，啟動娃娃機遊戲。硬體已直通，暫不走韌體啟動")
+                print("Pulse的Hi和Lo寬度都正確，啟動娃娃機遊戲。")
+                global Rounds_of_Starting_games
+                Rounds_of_Starting_games = Rounds_of_Starting_games + 1 
             else :
                 print("Pulse的Hi或Lo寬度不正確，不進行任何動作")
-            PAYOUT_last_rising_time = PAYOUT_rising_time            
+            PAYOUT_last_rising_time = PAYOUT_rising_time
+    
+    if pin == GPI_Claw_Coin_IN1 :
+        global Coin_IN1_falling_time, Coin_IN1_last_rising_time
+        Coin_IN1_value = GPI_Claw_Coin_IN1.value()
+        Coin_IN1_now_time = utime.ticks_ms()
+        print("Coin_IN1收到中斷:", Coin_IN1_value)
+        if Coin_IN1_value == 0 :
+            Coin_IN1_falling_time = Coin_IN1_now_time
+        elif Coin_IN1_value == 1 :
+            Coin_IN1_rising_time = Coin_IN1_now_time
+            Coin_IN1_hipulse_time = Coin_IN1_falling_time - Coin_IN1_last_rising_time
+            Coin_IN1_lowpulse_time = Coin_IN1_rising_time - Coin_IN1_falling_time
+            print("中斷Coin_IN1收到Hi Pulse，寬度(ms):", Coin_IN1_hipulse_time, ",和Low Pulse，寬度(ms):", Coin_IN1_lowpulse_time)
+            if Coin_IN1_hipulse_time >= 100 and (10 <= Coin_IN1_lowpulse_time and Coin_IN1_lowpulse_time <=200) :
+                print("Pulse的Hi和Lo寬度都正確，啟動娃娃機遊戲")
+                global Rounds_of_Starting_games
+                Rounds_of_Starting_games = Rounds_of_Starting_games + 1 
+            else :
+                print("Pulse的Hi或Lo寬度不正確，不進行任何動作")
+            Coin_IN1_last_rising_time = Coin_IN1_rising_time
+        
+            
 #    print('PAYOUT_end_time(ms):', time.ticks_ms())
+
+
+# 定義啟動娃娃機遊戲的函式
+Rounds_of_Starting_games = 0
+def GPIO_Send_Starting_games():
+    global Rounds_of_Starting_games
+    print('GPIO_Send_Starting_games (次):', Rounds_of_Starting_games)
+    while Rounds_of_Starting_games > 0:
+        GPO_Claw_CoinPayOUT.value(1)
+#        utime.sleep_ms(500)
+        GPO_Claw_CoinPayOUT.value(0)
+        utime.sleep_ms(50)
+        GPO_Claw_CoinPayOUT.value(1)
+        Rounds_of_Starting_games = Rounds_of_Starting_games -1
+        # 這邊要寫JSON值
+        if Rounds_of_Starting_games > 0:
+            utime.sleep_ms(100)
+
+
 
 ############################################# 初始化 #############################################
 
@@ -586,19 +615,25 @@ print('2開機秒數:', utime.ticks_ms() / 1000)
 # GPIO配置
 # 卡機端的TV-1QR、觸控按鈕配置
 GPIO_CardReader_PAYOUT = machine.Pin(25, machine.Pin.IN)
+# GPIO_CardReader_PAYOUT = machine.Pin(36, machine.Pin.IN)
 GPO_CardReader_EPAY_EN = machine.Pin(2, machine.Pin.OUT)
-GPO_CardReader_EPAY_EN.value(0)
+GPO_CardReader_EPAY_EN.value(1) # 先直接開通
+GPO_CardReader_PAYINOUT_EN = machine.Pin(19, machine.Pin.OUT)
+GPO_CardReader_PAYINOUT_EN.value(1) # 先直接開通s
 
 # 娃娃機端的投幣器、電眼配置
-
-GPI_Claw_Coin_IN1 = machine.Pin(36, machine.Pin.IN)
+GPI_Claw_Coin_IN1 = machine.Pin(16, machine.Pin.IN)
 GPI_Claw_Coin_IN2 = machine.Pin(39, machine.Pin.IN)
 GPO_Claw_Coin_EN = machine.Pin(5, machine.Pin.OUT)
 GPO_Claw_Coin_EN.value(1) # 未來後台決定是否開通投幣器功能
+GPO_Claw_CoinPayOUT = machine.Pin(26, machine.Pin.OPEN_DRAIN)
+GPO_Claw_CoinPayOUT.value(1)
 
 # GPIO 中斷配置
 # 設定TV-1QR PAYOUT中斷，觸發條件為正緣和負緣
 GPIO_CardReader_PAYOUT.irq(trigger = ( machine.Pin.IRQ_FALLING | machine.Pin.IRQ_RISING ), handler = GPI_interrupt_handler)
+GPI_Claw_Coin_IN1.irq(trigger = ( machine.Pin.IRQ_FALLING | machine.Pin.IRQ_RISING ), handler = GPI_interrupt_handler)
+#GPI_Claw_Coin_IN2.irq(trigger = ( machine.Pin.IRQ_FALLING | machine.Pin.IRQ_RISING ), handler = GPI_interrupt_handler)
 
 # 創建狀態機
 now_main_state = MainStateMachine()
