@@ -84,8 +84,9 @@ class WiFiManager:
             print(f"嘗試連線中... {retry+1}/10")
             time.sleep(2)
 
-        print("Wi-Fi 嘗試連線10次失敗！啟動 AP 設定模式")
-        self.start_ap_web()
+        # print("Wi-Fi 嘗試連線10次失敗！啟動 AP 設定模式")
+        # self.start_ap_web()
+        # print("Wi-Fi 失棄")
         return None
     
     def get_signal_strength(self):

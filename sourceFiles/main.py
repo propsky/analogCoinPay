@@ -108,18 +108,22 @@ network_info = wifi_manager.connect()
 if network_info: #會顯示net work config資料
     signal_strength = wifi_manager.get_signal_strength()
     print("WiFi Signal Strength:", signal_strength, "dBm")
-    
+    lcd_mgr.draw_text(0 , 16, text='SSID:')
+    lcd_mgr.draw_text(5 * 8 , 16, text=wifi_manager.ssid)
+    lcd_mgr.draw_text(0 , 16 * 2, text=network_info['ip'])
+    lcd_mgr.show()
+
+else:
+    wifi_manager.disconnect()
+    print("No Wifi") 
+    lcd_mgr.draw_text(0 , 16, text='No Wifi')
 
 
 
 # Main Code goes here, wlan is a working network.WLAN(STA_IF) instance.
 print("ESP OK")
+print(gc.mem_free())    
 
-lcd_mgr.draw_text(0 , 16, text='SSID:')
-lcd_mgr.draw_text(5 * 8 , 16, text=wifi_manager.ssid)
-lcd_mgr.draw_text(0 , 16 * 2, text=network_info['ip'])
-lcd_mgr.show()
-print(gc.mem_free())
 # =============================
 # NTP伺服器與時間處理
 # =============================
@@ -154,70 +158,72 @@ def tw_ntp(must=False):
     wifi_manager.get_http_time()
 
 
-#這裡待做斷網測試
-tw_ntp(must=True)
+#這裡待做斷網測試 2025/05/05已加上
+if network_info:
+    tw_ntp(must=True)
 
-# =============================
-# OTA更新相關
-# =============================
-# 檔案名稱
-filename = 'otalist.dat'
+    # =============================
+    # OTA更新相關
+    # =============================
+    # 檔案名稱
+    filename = 'otalist.dat'
 
-# 取得目錄下的所有檔案和資料夾
-file_list = os.listdir()
-print(file_list)
-print(gc.mem_free())
-# 檢查檔案是否存在
-if filename in file_list:
-    gc.collect()
+    # 取得目錄下的所有檔案和資料夾
+    file_list = os.listdir()
+    print(file_list)
     print(gc.mem_free())
-    # 在這邊要做讀取OTA列表，然後進行OTA的執行
-    print("OTA檔案存在")
-    import senko
-    lcd_mgr.draw_text(0 , 16 * 3, text="OTAing...")
-    lcd_mgr.show()
-    #debug test
-    try:
-      with open(filename) as f:
-          lines = f.readlines()[0].strip()
+    # 檢查檔案是否存在
+    if filename in file_list:
+        gc.collect()
+        print(gc.mem_free())
+        # 在這邊要做讀取OTA列表，然後進行OTA的執行
+        print("OTA檔案存在")
+        import senko
+        lcd_mgr.draw_text(0 , 16 * 3, text="OTAing...")
+        lcd_mgr.show()
+        #debug test
+        try:
+            with open(filename) as f:
+                lines = f.readlines()[0].strip()
 
-      lines = lines.replace(' ', '')
-      # 移除字串中的雙引號和空格，然後使用逗號分隔字串
-      file_list = [file.strip('"') for file in lines.split(',')]
+            lines = lines.replace(' ', '')
+            # 移除字串中的雙引號和空格，然後使用逗號分隔字串
+            file_list = [file.strip('"') for file in lines.split(',')]
 
-      # Senko初始化 執行ota 
-      OTA = senko.Senko(
-          user="hsilan-sui",  # Required
-          repo="happycollector",  # Required
-          branch="Sui_Branch",  # Optional: Defaults to "master"
-          working_dir="happyboard/20250310_HVO2_VERSION", 
-          files=file_list
-      )
-    #   OTA = senko.Senko(
-    #       user="pc0808f",  # Required
-    #       repo="happycollector",  # Required
-    #       branch="alpha",  # Optional: Defaults to "master"
-    #       working_dir="happyboard/20230524V1",  # Optional: Defaults to "app"
-    #       files=file_list
-    #   )
+            # Senko初始化 執行ota 
+            OTA = senko.Senko(
+                user="hsilan-sui",  # Required
+                repo="happycollector",  # Required
+                branch="Sui_Branch",  # Optional: Defaults to "master"
+                working_dir="happyboard/20250310_HVO2_VERSION", 
+                files=file_list
+            )
+            #   OTA = senko.Senko(
+            #       user="pc0808f",  # Required
+            #       repo="happycollector",  # Required
+            #       branch="alpha",  # Optional: Defaults to "master"
+            #       working_dir="happyboard/20230524V1",  # Optional: Defaults to "app"
+            #       files=file_list
+            #   )
 
-      gc.collect()
-      #print(f"Debugger:[main] 要進Senko {file_list}, {gc.mem_free()}")
-      if OTA.update():
-          print("Updated to the latest version! Rebooting...")
-          os.remove(filename)
-          # 這裡重啟 已經讓OTA更新 記憶體會恢復正常
-          machine.reset()
-    except Exception as e:
-      print(f"Updated error! Rebooting... ,{e}")
-    os.remove(filename)
+            gc.collect()
+            #print(f"Debugger:[main] 要進Senko {file_list}, {gc.mem_free()}")
+            if OTA.update():
+                print("Updated to the latest version! Rebooting...")
+                os.remove(filename)
+                # 這裡重啟 已經讓OTA更新 記憶體會恢復正常
+                machine.reset()
+        except Exception as e:
+            print(f"Updated error! Rebooting... ,{e}")
+            os.remove(filename)
+    else:
+        lcd_mgr.draw_text(0, 16 * 3 ,text="No OTA")
+        lcd_mgr.show()
+        print("OTA檔案不存在")
+
+    print("ESP OTA OK")
 else:
-    lcd_mgr.draw_text(0, 16 * 3 ,text="No OTA")
-    lcd_mgr.show()
-    print("OTA檔案不存在")
-
-print("ESP OTA OK")
-
+    print("No wifi No OTA!!!!")
 # =============================
 # 運行主程式
 # =============================
