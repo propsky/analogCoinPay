@@ -12,6 +12,9 @@ class WiFiManager:
         self.wifi = network.WLAN(network.STA_IF)
         self.wifi.active(True)
 
+        unique_id_hex = binascii.hexlify(machine.unique_id()[-3:]).decode().upper()
+        self.DHCP_NAME = "Happy_" + unique_id_hex        
+
         self.ap_ssid, self.ap_password = self.generate_ap_credentials()
 
         # 讀取 wifi.dat 中的 SSID & 密碼
@@ -74,6 +77,7 @@ class WiFiManager:
 
         print(f"嘗試連線 Wi-Fi {self.ssid} ...")
         self.disconnect()
+        self.wifi.config(dhcp_hostname=self.DHCP_NAME)
         self.wifi.connect(self.ssid, self.password)
         
         # 嘗試10次

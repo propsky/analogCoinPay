@@ -24,6 +24,9 @@ LCD_EN = Pin(27, Pin.OUT, value=1)#第三個參數是預設輸出電 #LCD_EN.val
 # keyD = Pin(39, Pin.IN, Pin.PULL_UP)
 ESP32_TXD2_FEILOLI = Pin(17, Pin.IN)
 
+GPO_CardReader_EPAY_EN = machine.Pin(2, machine.Pin.OUT)
+GPO_CardReader_EPAY_EN.value(0)
+
 # 把st7735所有相關的模組都寫在lcd_manager
 # 獲取 LCD 單例singleton
 lcd_mgr = LCDManager.get_instance() 
@@ -84,18 +87,21 @@ def UDP_Load_Wifi():
         sleep(3)
         machine.reset()
 
+Data_74HC165 = readKBData(1, CP, CE, PL, Q7)
 
-if readKBData(1,CP,CE,PL,Q7)[0] == 0 :
+print("74HC165:", Data_74HC165)
+if Data_74HC165[3] == 0 :
+    print("SW1被按下，結束程式")
+    import sys
+    sys.exit()
+elif Data_74HC165[0] == 0 :
     print("SW4被按下，進入UDP load wifi")
-    #from utils import UDP_Load_Wifi
     UDP_Load_Wifi()
 elif ESP32_TXD2_FEILOLI.value() == 0 :
     print("ESP32_TXD2_FEILOLI被拉Low，進入UDP load wifi")
-    #from utils import UDP_Load_Wifi
     UDP_Load_Wifi()
 
-
-sleep(3)
+sleep(1)
 wdt=WDT(timeout=1000*60*5) 
 
 # =============================
@@ -130,12 +136,12 @@ print(gc.mem_free())
 # # 增加多個NTP伺服器選項(失敗就會跳下一個嘗試)
 def tw_ntp(must=False):
     ntp_servers = [
+        "time.google.com", #Google NTP 伺服器，全球適用 
         "clock.stdtime.gov.tw", 
         "time.stdtime.gov.tw",
         "watch.stdtime.gov.tw", 
         "tick.stdtime.gov.tw", 
-        "pool.ntp.org",  # 全球可用 NTP 伺服器 test ok
-        "time.google.com" #Google NTP 伺服器，全球適用 
+        "pool.ntp.org"  # 全球可用 NTP 伺服器 test ok
     ]  
     ntptime.NTP_DELTA = 3155673600 # UTC+8 的 magic number
     #3155673600 秒 = UTC+8 的時間修正值（因為 MicroPython 預設 NTP 是 UTC 1970 年）
@@ -192,34 +198,26 @@ if network_info:
 
             # Senko初始化 執行ota 
             OTA = senko.Senko(
-                user="hsilan-sui",  # Required
-                repo="happycollector",  # Required
-                branch="Sui_Branch",  # Optional: Defaults to "master"
-                working_dir="happyboard/20250310_HVO2_VERSION", 
+                user="propsky",  # Required
+                repo="analogCoinPay",  # Required
+                branch="SP2_HWv1",  # Optional: Defaults to "master"
+                working_dir="happyboareleaseFiles/latestVersion", 
                 files=file_list
             )
-            #   OTA = senko.Senko(
-            #       user="pc0808f",  # Required
-            #       repo="happycollector",  # Required
-            #       branch="alpha",  # Optional: Defaults to "master"
-            #       working_dir="happyboard/20230524V1",  # Optional: Defaults to "app"
-            #       files=file_list
-            #   )
 
             gc.collect()
-            #print(f"Debugger:[main] 要進Senko {file_list}, {gc.mem_free()}")
             if OTA.update():
                 print("Updated to the latest version! Rebooting...")
-                os.remove(filename)
-                # 這裡重啟 已經讓OTA更新 記憶體會恢復正常
-                machine.reset()
+            else:
+                print("No changed-file for OTA")
         except Exception as e:
-            print(f"Updated error! Rebooting... ,{e}")
-            os.remove(filename)
+            print(f"Updated error!,{e}")
+        os.remove(filename)
+        machine.reset()
     else:
         lcd_mgr.draw_text(0, 16 * 3 ,text="No OTA")
         lcd_mgr.show()
-        print("OTA檔案不存在")
+
 
     print("ESP OTA OK")
 else:
@@ -233,11 +231,18 @@ while True:
         lcd_mgr.show()
         sleep(1)
 
+
+    try:
+        del ntptime
+        del wifi_manager
+    except Exception as e:
+        print("del error", e)
+        pass
+
     gc.collect()
     try:
         print("執行analogCoinPay_Main.py...")
-        #print("Debugger:[main.py] 執行Data_Collection_Main.py之前 記憶體:")
         execfile('analogCoinPay_Main.py')
     except Exception as e:
-        print("執行失敗，改跑Data_Collection_Main.mpy", e)
-        __import__('Data_Collection_Main.mpy')       
+        print("執行失敗", e)
+        utime.sleep(5)
