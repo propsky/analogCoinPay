@@ -1,4 +1,4 @@
-VERSION = "SP2_V0.0610sa"
+VERSION = "SP2_V0.0610sb"
 
 import machine
 import binascii
@@ -172,6 +172,12 @@ def subscribe_MQTT_claw_recive_callback(topic, message):
                     with open(otafile, "w") as f:
                         f.write(''.join(data['file_list']))
                     print("otafile 輸出完成，即將重開機...")
+                    # 關掉卡機電源和刷卡功能
+                    GPO_CardReader_EPAY_EN.value(0)
+                    GPO_CardReader_PAYINOUT_EN.value(0)
+                    GPO_CardReader_I2C_EN.value(0)
+                    # 關掉投幣器電源
+                    GPO_Claw_Coin_EN.value(0)
                     utime.sleep(3)
                     machine.reset()
                 else:

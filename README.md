@@ -1,5 +1,8 @@
 # code-change list
 
+**2025/6/10_SP2_V0.0610sb, Thomas**
+1. MQTT收到OTA指令時，在重開機以前會先關掉卡機電源和刷卡功能，以及關掉投幣器電源
+* Based on smartpay2 2025/6/10_SP2_V0.0610sa, Thomas
 **2025/6/10_SP2_V0.0610sa, Thomas**
 1. wifi斷線時，不影響投幣器、卡機、電眼的相關功能，並且仍能定期清除WDT
 2. 新增meter功能
