@@ -1,6 +1,6 @@
 # code-change list
 
-**2025/5/5_SP2_V0.0610sa, Thomas**
+**2025/6/10_SP2_V0.0610sa, Thomas**
 1. wifi斷線時，不影響投幣器、卡機、電眼的相關功能，並且仍能定期清除WDT
 2. 新增meter功能
 3. 可以接受MQTT的epays、freeplays的啟動指令
