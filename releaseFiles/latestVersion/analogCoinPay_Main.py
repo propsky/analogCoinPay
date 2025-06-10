@@ -1,4 +1,4 @@
-VERSION = "SP2_V0.0610sb"
+VERSION = "SP2_V0.0610sc"
 
 import machine
 import binascii
