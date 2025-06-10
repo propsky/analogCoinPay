@@ -1,39 +1,55 @@
-import wifimgr
-import utime
-import machine
+from utime import sleep
 import os
-from dr.st7735.st7735_4bit import ST7735
-from machine import SPI, Pin
-from machine import WDT
+import senko
+from machine import SPI, Pin, WDT
 import network
 import ntptime
-from machine import Pin
 from BN165DKBDriver import readKBData
+import machine
+#　lcd 模組
+from lcd_manager import LCDManager
+#from wifi_manager import WiFiManager 
+from wifimgr import WiFiManager
 
-print('\n\r開始執行main.py初始化')
-print('開機秒數:', utime.ticks_ms() / 1000)
-gc.collect()
-print(gc.mem_free())
+# GPIO配置
 
+# 卡機端的TV-1
 GPO_CardReader_EPAY_EN = machine.Pin(2, machine.Pin.OUT)
 GPO_CardReader_EPAY_EN.value(0)
+GPO_CardReader_PAYINOUT_EN = machine.Pin(19, machine.Pin.OUT)
+GPO_CardReader_PAYINOUT_EN.value(0)
+GPO_CardReader_I2C_EN = machine.Pin(21, machine.Pin.OUT)
+GPO_CardReader_I2C_EN.value(0)
+# 以上關掉卡機電源和刷卡功能
+# 娃娃機端的投幣器電源配置
+GPO_Claw_Coin_EN = machine.Pin(5, machine.Pin.OUT)
+GPO_Claw_Coin_EN.value(0)
+# 以上關掉投幣器電源
 
-LCD_EN = machine.Pin(27, machine.Pin.OUT)
-LCD_EN.value(1)
-spi = SPI(1, baudrate=20000000, polarity=0, phase=0, sck=Pin(14), mosi=Pin(13))
-st7735 = ST7735(spi, 4, 15, None, 128, 160, rotate=0)
-st7735.initb2()
-st7735.setrgb(True)
-from gui.colors import colors
-color = colors(st7735)
-from dr.display import display
-import fonts.spleen16 as spleen16
-dis = display(st7735, 'ST7735_FB', color.WHITE, color.BLUE)
+# 165D键盘的四根数据线对应的GPIO
+CP = Pin(0, Pin.OUT)
+CE = Pin(0, Pin.OUT)
+PL = Pin(32, Pin.OUT)
+Q7 = Pin(33, Pin.IN)
 
-dis.fill(color.BLACK)
-dis.draw_text(spleen16, 'Happy Collector', 0, 0, 1, dis.fgcolor, dis.bgcolor, -1, True, 0, 0)
-dis.dev.show()
+LCD_EN = Pin(27, Pin.OUT, value=1)#第三個參數是預設輸出電 #LCD_EN.value(1)
+# keyMenu = Pin(0, Pin.IN, Pin.PULL_UP) #尚未使用先comment掉
+# keyU = Pin(36, Pin.IN, Pin.PULL_UP)
+# keyD = Pin(39, Pin.IN, Pin.PULL_UP)
+ESP32_TXD2_FEILOLI = Pin(17, Pin.IN)
 
+# 把st7735所有相關的模組都寫在lcd_manager
+# 獲取 LCD 單例singleton
+lcd_mgr = LCDManager.get_instance() 
+# LCD單例初始化
+lcd_mgr.initialize()
+lcd_mgr.fill()  # 使用預設顏色（黑色）
+# 繪製文字
+lcd_mgr.draw_text(0, 0, fg=lcd_mgr.color.WHITE, bg=lcd_mgr.color.BLUE, bgmode=-1) 
+#bgmode預設是0 ==>使用預設的bgcolor 例如:.fill()所指定的
+#bgmode預設是-1 ==>使用當前參數所指定的bgcolor bg=lcd_mgr.color.BLUE
+
+lcd_mgr.show()
 gc.collect()
 print(gc.mem_free())
 
@@ -42,8 +58,8 @@ def UDP_Load_Wifi():
         import usocket as socket
     except:
         import socket
-    dis.draw_text(spleen16, 'wait UDP Wi-Fi.', 0, 16*1, 1, dis.fgcolor, dis.bgcolor, 0, True, 0, 0)
-    dis.dev.show()
+    lcd_mgr.draw_text(0, 16,text='wait UDP Wi-Fi.', fg=lcd_mgr.color.WHITE, bg=lcd_mgr.color.BLACK, bgmode=-1) 
+    lcd_mgr.show()
     # Connect to Wi-Fi
     wifi_ssid = "Sam"
     wifi_password = "0928666624"
@@ -51,175 +67,188 @@ def UDP_Load_Wifi():
     station = network.WLAN(network.STA_IF)
     station.active(True)
     station.connect(wifi_ssid, wifi_password)
+
     while not station.isconnected():
-        utime.sleep_ms(500)
+        pass
+
     print("Connected to Wi-Fi")
-    print('Network config: ', station.ifconfig())
-    dis.draw_text(spleen16, 'UDP Wi-Fi OK', 0, 16*2, 1, dis.fgcolor, dis.bgcolor, 0, True, 0, 0)
-    dis.draw_text(spleen16, 'IP:', 0, 16*3, 1, dis.fgcolor, dis.bgcolor, 0, True, 0, 0)
-    dis.draw_text(spleen16, station.ifconfig()[0], 3, 16*4, 1, dis.fgcolor, dis.bgcolor, 0, True, 0, 0)
-    dis.dev.show()
+    print('\nConnected. Network config: ', station.ifconfig())
+    lcd_mgr.draw_text(0, 32, text='UDP Wi-Fi OK')
+    lcd_mgr.draw_text(0, 48, text='IP:') 
+    lcd_mgr.draw_text(3, 64, text=station.ifconfig()[0]) 
+    lcd_mgr.show()
 
     # Set up UDP socket
     udp_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     udp_socket.bind(("0.0.0.0", 1234))
 
     print("Listening for UDP messages on port 1234")
-    dis.draw_text(spleen16, "wait UDP...", 0, 16*5, 1, dis.fgcolor, dis.bgcolor, 0, True, 0, 0)
-    dis.dev.show()
+    lcd_mgr.draw_text(0, 80, text='wait UDP...')
+    lcd_mgr.show()
 
     while True:
         data, addr = udp_socket.recvfrom(1024)
         print("Received message: {}".format(data.decode('utf-8')))
-        dis.draw_text(spleen16, data.decode('utf-8'), 0, 16*6, 1, dis.fgcolor, dis.bgcolor, 0, True, 0, 0)
-        dis.dev.show()
+        lcd_mgr.draw_text(0, 96,text=data.decode('utf-8'))
+        lcd_mgr.show()
         with open('wifi.dat', "w") as f:
             f.write(data.decode('utf-8'))
-        utime.sleep(3)
+        sleep(3)
         machine.reset()
 
-ESP32_TXD2_FEILOLI = machine.Pin(17, machine.Pin.IN)
-# 165D键盘的四根数据线对应的GPIO
-CP = Pin(0, Pin.OUT)
-CE = Pin(0, Pin.OUT)
-PL = Pin(32, Pin.OUT)
-Q7 = Pin(33, Pin.IN)
-Data_74HC165 = readKBData(1, CP, CE, PL, Q7)
-print("74HC165:", Data_74HC165)
-if Data_74HC165[3] == 0 :
-    print("SW1被按下，結束程式")
-    import sys
-    sys.exit()
-elif Data_74HC165[0] == 0 :
+
+if readKBData(1,CP,CE,PL,Q7)[0] == 0 :
+    from mach_meter import MachMeter
+    print("正在初始化 MachMeter，並且歸零。")
+    meter = MachMeter()
+    meter.reset_all_data()
+    meter.save()
     print("SW4被按下，進入UDP load wifi")
+    #from utils import UDP_Load_Wifi
     UDP_Load_Wifi()
 elif ESP32_TXD2_FEILOLI.value() == 0 :
     print("ESP32_TXD2_FEILOLI被拉Low，進入UDP load wifi")
+    #from utils import UDP_Load_Wifi
     UDP_Load_Wifi()
 
-utime.sleep(1)
+
+# sleep(3)
+sleep(60) # for 景新 中華 4G AP
 wdt=WDT(timeout=1000*60*5) 
 
-wlan = wifimgr.get_connection()
-if wlan is None:
-    print("Could not initialize the network connection.")
-    while True:
-        utime.sleep_ms(500)     # you shall not pass :D
+# =============================
+# wifi連線
+# =============================
+wifi_manager = WiFiManager()
+network_info = wifi_manager.connect()
+#print(f"網路WiFi:{network_info}")
 
-def get_wifi_signal_strength(wlan):
-    if wlan.isconnected():
-        signal_strength = wlan.status('rssi')
-        return signal_strength
-    else:
-        return None
+if network_info: #會顯示net work config資料
+    signal_strength = wifi_manager.get_signal_strength()
+    print("WiFi Signal Strength:", signal_strength, "dBm")
+    lcd_mgr.draw_text(0 , 16, text='SSID:')
+    lcd_mgr.draw_text(5 * 8 , 16, text=wifi_manager.ssid)
+    lcd_mgr.draw_text(0 , 16 * 2, text=network_info['ip'])
+    lcd_mgr.show()
 
-signal_strength = get_wifi_signal_strength(wlan)
-if signal_strength is not None:
-    print("Wi-Fi Signal Strength:", signal_strength, "dBm")
 else:
-    print("Unable to retrieve signal strength.")
+    wifi_manager.disconnect()
+    print("No Wifi") 
+    lcd_mgr.draw_text(0 , 16, text='No Wifi')
 
-print("ESP Wi-Fi OK")
 
-dis.draw_text(spleen16, 'SSID:', 0, 16, 1, dis.fgcolor, dis.bgcolor, 0, True, 0, 0)
-dis.draw_text(spleen16, wlan.config('essid'), 5 * 8, 16, 1, dis.fgcolor, dis.bgcolor, 0, )
-dis.draw_text(spleen16, wlan.ifconfig()[0], 0, 16 + 16, 1, dis.fgcolor, dis.bgcolor, 0, True, 0, 0)
-dis.dev.show()
 
-def tw_ntp(host='clock.stdtime.gov.tw', must=False):
-    """
-    host: 台灣可用的 ntp server 如下可任選，未指定預設為 clock.stdtime.gov.tw
-        tock.stdtime.gov.tw
-        watch.stdtime.gov.tw
-        time.stdtime.gov.tw
-        clock.stdtime.gov.tw
-        tick.stdtime.gov.tw
-    must: 是否非對到不可
-    """ 
+# Main Code goes here, wlan is a working network.WLAN(STA_IF) instance.
+print("ESP OK")
+print(gc.mem_free())    
+
+# =============================
+# NTP伺服器與時間處理
+# =============================
+# # 增加多個NTP伺服器選項(失敗就會跳下一個嘗試)
+def tw_ntp(must=False):
+    ntp_servers = [
+        "clock.stdtime.gov.tw", 
+        "time.stdtime.gov.tw",
+        "watch.stdtime.gov.tw", 
+        "tick.stdtime.gov.tw", 
+        "pool.ntp.org",  # 全球可用 NTP 伺服器 test ok
+        "time.google.com" #Google NTP 伺服器，全球適用 
+    ]  
     ntptime.NTP_DELTA = 3155673600 # UTC+8 的 magic number
-    ntptime.host = host
-    count = 1
-    if must:
-        count = 100
-    for _ in  range(count):
+    #3155673600 秒 = UTC+8 的時間修正值（因為 MicroPython 預設 NTP 是 UTC 1970 年）
+    #count = 1 if not must else 10 #最多嘗試10次
+
+    #for _ in  range(count):
+    for server in ntp_servers:
         try:
-            ntptime.settime()
-        except:
-            utime.sleep(1)
-            continue
-        else:
+            ntptime.host = server # 調整時間的基準值
+            ntptime.settime() #設定timeout 
+            print(f"NTP 時間同步成功，使用 {server}")
             return True
-    return False
+        except Exception as e:
+            print(f"嘗試 {server} 失敗: {e}")
+            #sleep(1)
+            sleep(1)  # uniform(1, 3)隨機等待 1~3 秒，降低被封鎖的風險
+            continue  # 不 return False，繼續嘗試下一個伺服器
+    print("所有 NTP 伺服器皆無法同步，改用 HTTP 時間")
+    # 用http做時間同步的備援
+    wifi_manager.get_http_time()
 
-tw_ntp(must=True)
 
-# 檔案名稱
-filename = 'otalist.dat'
-# 取得目錄下的所有檔案和資料夾
-file_list = os.listdir()
-print(file_list)
-# 檢查OTA檔案是否存在
-if filename in file_list:
-    # 在這邊要做讀取OTA列表，然後進行OTA的執行
-    print("OTA檔案存在, checking files...")
-    dis.draw_text(spleen16, "OTAing...", 0, 16 + 16 + 16, 1, dis.fgcolor, dis.bgcolor, 0, True, 0, 0)
-    dis.dev.show()
-    try:
-        with open(filename) as f:
-            lines = f.readlines()[0].strip()
+#這裡待做斷網測試 2025/05/05已加上
+if network_info:
+    tw_ntp(must=True)
 
-        lines = lines.replace(' ', '')
+    # =============================
+    # OTA更新相關
+    # =============================
+    # 檔案名稱
+    filename = 'otalist.dat'
 
-        # 移除字串中的雙引號和空格，然後使用逗號分隔字串
-        file_list = [file.strip('"') for file in lines.split(',')]
+    # 取得目錄下的所有檔案和資料夾
+    file_list = os.listdir()
+    print(file_list)
+    print(gc.mem_free())
+    # 檢查檔案是否存在
+    if filename in file_list:
+        gc.collect()
+        print(gc.mem_free())
+        # 在這邊要做讀取OTA列表，然後進行OTA的執行
+        print("OTA檔案存在")
         import senko
-        OTA = senko.Senko(
-            user="pc0808f",  # Required
-            repo="smartpay",  # Required
-            branch="SPHP_HWv1",  # Optional: Defaults to "master"
-            working_dir="releaseFiles/latestVersion",  # Optional: Defaults to "app"
-            files=file_list
-        )
+        lcd_mgr.draw_text(0 , 16 * 3, text="OTAing...")
+        lcd_mgr.show()
+        #debug test
+        try:
+            with open(filename) as f:
+                lines = f.readlines()[0].strip()
 
-        if OTA.update():
-            print("Updated to the latest version!")
-        else:
-            print("No changed-file for OTA!")
-    except:
-        print("Updated error!")
-    
-    print("刪除OTA檔案, rebooting...")
-    os.remove(filename)
-    machine.reset()
+            lines = lines.replace(' ', '')
+            # 移除字串中的雙引號和空格，然後使用逗號分隔字串
+            file_list = [file.strip('"') for file in lines.split(',')]
+
+            # Senko初始化 執行ota 
+            OTA = senko.Senko(
+                user="propsky",  # Required
+                repo="analogCoinPay",  # Required
+                branch="SP2_HWv1",  # Optional: Defaults to "master"
+                working_dir="releaseFiles/latestVersion",  # Optional: Defaults to "app"
+                files=file_list
+            )
+
+            gc.collect()
+            #print(f"Debugger:[main] 要進Senko {file_list}, {gc.mem_free()}")
+            if OTA.update():
+                print("Updated to the latest version! Rebooting...")
+                os.remove(filename)
+                # 這裡重啟 已經讓OTA更新 記憶體會恢復正常
+                machine.reset()
+        except Exception as e:
+            print(f"Updated error! Rebooting... ,{e}")
+            os.remove(filename)
+    else:
+        lcd_mgr.draw_text(0, 16 * 3 ,text="No OTA")
+        lcd_mgr.show()
+        print("OTA檔案不存在")
+
+    print("ESP OTA OK")
 else:
-    dis.draw_text(spleen16, "No OTA", 0, 16 + 16 + 16, 1, dis.fgcolor, dis.bgcolor, 0, True, 0, 0)
-    dis.dev.show()
-    print("OTA檔案不存在")
-
-print("ESP OTA OK")
-
+    print("No wifi No OTA!!!!")
+# =============================
+# 運行主程式
+# =============================
 while True:
     for i in range(3, 0, -1):
-        dis.draw_text(spleen16, "CountDown..." + str(i), 0, 16 + 16 + 16, 1, dis.fgcolor, color.BLACK, -1, True, 0, 0)
-        dis.dev.show()
-        utime.sleep(1)
+        lcd_mgr.draw_text(0, 16 * 3, text=f"CountDown...{str(i)}",bg=lcd_mgr.color.BLACK, bgmode=-1)
+        lcd_mgr.show()
+        sleep(1)
 
-    # 釋放資源
-    try:
-        del ntptime
-        del wifimgr
-    except Exception as e:
-        print("del error:", e)
-        pass
-
-    print(st7735)
-    # import micropython
     gc.collect()
-    # print(micropython.mem_info())
-    print(gc.mem_free())
     try:
-        print("執行 analogCoinPay_Main.py ...")
+        print("執行analogCoinPay_Main.py...")
+        #print("Debugger:[main.py] 執行Data_Collection_Main.py之前 記憶體:")
         execfile('analogCoinPay_Main.py')
     except Exception as e:
-        print("執行失敗:", e)
-        utime.sleep(5)
+        print("執行失敗，改跑Data_Collection_Main.mpy", e)
+        __import__('Data_Collection_Main.mpy')       
