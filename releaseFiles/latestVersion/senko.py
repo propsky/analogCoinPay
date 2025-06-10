@@ -62,19 +62,19 @@ class Senko:
             latest_version = None
             local_version = None
 
-            # 新增重試機制：最多嘗試 3 次來獲取遠端檔案
-            for attempt in range(3):
+            # 新增重試機制：最多嘗試 10 次來獲取遠端檔案
+            for attempt in range(10):
                 content = self._get_file(self.url + "/" + file)
                 if content is not None:
                     latest_version = content
                     break  # 成功下載，跳出重試迴圈
                 else:
-                    print("Failed to check {}, attempt {}/3. Retrying in 1s...".format(file, attempt + 1))
+                    print("Failed to check {}, attempt {}/10. Retrying in 1s...".format(file, attempt + 1))
                     utime.sleep(1)
 
-            # 如果 3 次後仍然失敗，則跳過此檔案的檢查
+            # 如果 10 次後仍然失敗，則跳過此檔案的檢查
             if latest_version is None:
-                print("Could not get remote version of {} after 3 attempts. Skipping check.".format(file))
+                print("Could not get remote version of {} after 10 attempts. Skipping check.".format(file))
                 gc.collect()
                 continue
 
@@ -122,7 +122,7 @@ class Senko:
         for file in changes:
             latest_version = None
             
-            for attempt in range(3):
+            for attempt in range(10):
                 content = self._get_file(self.url + "/" + file)
                 if content is not None:
                     latest_version = content
@@ -140,7 +140,7 @@ class Senko:
                 except Exception as e:
                     print("Failed to write to file {}: {}".format(file, e))
             else:
-                print("Could not update {} after 3 attempts. Skipping.".format(file))
+                print("Could not update {} after 10 attempts. Skipping.".format(file))
 
             # 記憶體回收
             latest_version = None
