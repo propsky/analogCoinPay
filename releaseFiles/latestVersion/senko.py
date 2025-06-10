@@ -1,156 +1,139 @@
+# 導入所有需要的模組
 import urequests
 import uhashlib
 import utime
 import gc
+import os # <--- 新增導入 os 模組
 
 class Senko:
     raw = "https://raw.githubusercontent.com"
     github = "https://github.com"
 
     def __init__(self, user, repo, url=None, branch="master", working_dir="app", files=["boot.py", "main.py"], headers={}):
-        """Senko OTA agent class.
-
-        Args:
-            user (str): GitHub user.
-            repo (str): GitHub repo to fetch.
-            branch (str): GitHub repo branch. (master)
-            working_dir (str): Directory inside GitHub repo where the micropython app is.
-            url (str): URL to root directory.
-            files (list): Files included in OTA update.
-            headers (list, optional): Headers for urequests.
-        """
         self.base_url = "{}/{}/{}".format(self.raw, user, repo) if user else url.replace(self.github, self.raw)
         self.url = url if url is not None else "{}/{}/{}".format(self.base_url, branch, working_dir)
         self.headers = headers
         self.files = files
+        self.chunk_size = 512  # 設定每個數據塊的大小 (bytes)
 
-    def _check_hash(self, x, y):
-        x_hash = uhashlib.sha1(x.encode())
-        y_hash = uhashlib.sha1(y.encode())
-
-        x = x_hash.digest()
-        y = y_hash.digest()
-
-        if str(x) == str(y):
-            return True
-        else:
-            return False
-
-    def _get_file(self, url):
+    def _get_local_hash(self, file):
+        """以流式讀取本地檔案並計算 SHA1 雜湊值"""
         try:
-            payload = urequests.get(url, headers=self.headers)
-            code = payload.status_code
+            with open(file, 'rb') as f:
+                sha = uhashlib.sha1()
+                while True:
+                    chunk = f.read(self.chunk_size)
+                    if not chunk:
+                        break
+                    sha.update(chunk)
+                return sha.digest()
+        except OSError:
+            # 檔案不存在，回傳空字串的雜湊值
+            return uhashlib.sha1(b"").digest()
 
-            if code == 200:
-                return payload.text
-            else:
-                print("Got HTTP {} for {}".format(code, url))
-                return None
+    def _stream_to_temp_and_hash(self, url):
+        """以流式下載檔案至暫存檔，並同時計算雜湊值"""
+        temp_file = "senko.tmp"
+        sha = uhashlib.sha1()
+        
+        try:
+            # 確保舊的暫存檔被刪除
+            if "senko.tmp" in os.listdir():
+                os.remove(temp_file)
+
+            resp = urequests.get(url, headers=self.headers)
+            if resp.status_code != 200:
+                print("Got HTTP {} for {}".format(resp.status_code, url))
+                resp.close()
+                return None, None
+            
+            with open(temp_file, 'wb') as f:
+                while True:
+                    chunk = resp.raw.read(self.chunk_size)
+                    if not chunk:
+                        break
+                    f.write(chunk)
+                    sha.update(chunk)
+            
+            resp.close()
+            return temp_file, sha.digest()
+
         except Exception as e:
-            print("Failed to get file from {}: {}".format(url, e))
-            return None
-
-    # ------------------- MODIFIED _check_all METHOD START -------------------
+            print("Failed to stream download {}: {}".format(url, e))
+            # 清理可能不完整的暫存檔
+            if "senko.tmp" in os.listdir():
+                os.remove(temp_file)
+            return None, None
 
     def _check_all(self):
-        """
-        Check all files for changes, with retry and memory management.
-        """
+        """以流式下載檢查所有檔案是否有變更"""
         changes = []
-
         for file in self.files:
-            latest_version = None
-            local_version = None
-
-            # 新增重試機制：最多嘗試 10 次來獲取遠端檔案
-            for attempt in range(10):
-                content = self._get_file(self.url + "/" + file)
-                if content is not None:
-                    latest_version = content
-                    break  # 成功下載，跳出重試迴圈
-                else:
-                    print("Failed to check {}, attempt {}/10. Retrying in 1s...".format(file, attempt + 1))
-                    utime.sleep(1)
-
-            # 如果 10 次後仍然失敗，則跳過此檔案的檢查
-            if latest_version is None:
-                print("Could not get remote version of {} after 10 attempts. Skipping check.".format(file))
-                gc.collect()
-                continue
-
-            # 獲取本地檔案內容
-            try:
-                with open(file, "r") as local_file:
-                    local_version = local_file.read()
-            except:
-                # 本地端檔案不存在，視為需要更新
-                local_version = ""
-
-            # 比對雜湊值
-            if not self._check_hash(latest_version, local_version):
-                changes.append(file)
+            remote_hash = None
             
-            # 記憶體回收
-            latest_version = None
-            local_version = None
-            gc.collect()
-
-        return changes
-
-    # -------------------- MODIFIED _check_all METHOD END --------------------
-
-    def fetch(self):
-        """Check if newer version is available.
-
-        Returns:
-            True - if is, False - if not.
-        """
-        if not self._check_all():
-            return False
-        else:
-            return True
-
-    def update(self):
-        """
-        Replace all changed files with newer one, with retry and memory management.
-        Returns:
-            True - if at least one file was updated, False - if not.
-        """
-        changes = self._check_all()
-        files_updated = [] 
-
-        for file in changes:
-            latest_version = None
-            
-            for attempt in range(10):
-                content = self._get_file(self.url + "/" + file)
-                if content is not None:
-                    latest_version = content
+            # 帶有重試機制地獲取遠端雜湊值
+            for attempt in range(3):
+                temp_file, r_hash = self._stream_to_temp_and_hash(self.url + "/" + file)
+                if temp_file:
+                    os.remove(temp_file) # 檢查完畢，刪除暫存檔
+                    remote_hash = r_hash
                     break
                 else:
-                    print("Failed to download {}, attempt {}/3. Retrying in 1s...".format(file, attempt + 1))
+                    print("Failed to check {}, attempt {}/3. Retrying...".format(file, attempt + 1))
                     utime.sleep(1)
 
-            if latest_version is not None:
-                try:
-                    with open(file, "w") as local_file:
-                        local_file.write(latest_version)
-                    files_updated.append(file)
-                    print("Successfully updated {}.".format(file))
-                except Exception as e:
-                    print("Failed to write to file {}: {}".format(file, e))
-            else:
-                print("Could not update {} after 10 attempts. Skipping.".format(file))
+            if not remote_hash:
+                print("Could not get remote hash for {}. Skipping.".format(file))
+                continue
+            
+            local_hash = self._get_local_hash(file)
 
-            # 記憶體回收
-            latest_version = None
+            if remote_hash != local_hash:
+                changes.append(file)
+                print("File '{}' has changed.".format(file))
+
             gc.collect()
-            print("Memory cleaned up after processing {}.".format(file))
+        return changes
+
+    def fetch(self):
+        """檢查是否有新版本可用"""
+        return bool(self._check_all())
+
+    def update(self):
+        """以流式下載和原子性取代來更新檔案"""
+        changes = self._check_all()
+        files_updated = []
+
+        for file in changes:
+            updated = False
+            # 帶有重試機制地下載並取代檔案
+            for attempt in range(3):
+                temp_file, remote_hash = self._stream_to_temp_and_hash(self.url + "/" + file)
+                
+                if temp_file and remote_hash:
+                    # 再次驗證本地雜湊值，以防萬一
+                    local_hash = self._get_local_hash(file)
+                    if remote_hash != local_hash:
+                        os.rename(temp_file, file) # 原子性操作，安全地取代舊檔案
+                        print("Successfully updated {}.".format(file))
+                    else:
+                        # 在下載過程中，本地檔案可能已被其他方式更新
+                        os.remove(temp_file)
+                        print("File '{}' already up to date.".format(file))
+                    updated = True
+                    break # 成功，跳出重試
+                else:
+                    print("Failed to download {}, attempt {}/3. Retrying...".format(file, attempt + 1))
+                    utime.sleep(1)
+            
+            if updated:
+                files_updated.append(file)
+            else:
+                 print("Could not update {} after 3 attempts. Skipping.".format(file))
+
+            gc.collect()
 
         if files_updated:
             print("Update complete. Updated files: {}".format(files_updated))
             return True
-        else:
-            if changes:
-                 print("Update failed. No files were updated.")
-            return False
+        return False
