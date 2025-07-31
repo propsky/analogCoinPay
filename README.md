@@ -1,5 +1,14 @@
 # code-change list
 
+**2025/7/31_SP2_V0.0731sa, Thomas**
+1. 新增push check list(./push-check-list.md)
+2. Eyes_IRDIS新增進中斷，紀錄正緣和負緣的時間點，Is_FEILOLI_eyes改到此中斷進行判斷和修改
+3. Eyes_IROUT中斷後，不判斷Eyes_IRDIS、不修改Is_FEILOLI_eyes；飛絡力電眼的部分，新增判斷Eyes_Enable_time(IRDIS正緣->IROUT負緣)時間要大於500ms
+4. 為了防只同樣的準位下，出現非預期的重複中斷。PAYOUT、Coin_IN1、Coin_IN2新增last_value，各自中斷時，會先判斷新值和舊值有沒有改變，若有才會做後續中斷處理。
+5. 2和4的狀態再開機時會先讀取和修改，並且列印出log。
+6. 刪掉多餘的空白和註解掉用不到的程式碼。
+* Based on smartpay2 7/15_SP2_V0.0610sd, Thomas整理Sam修改
+---
 **2025/7/15_SP2_V0.0610sd, Thomas整理Sam修改**
 1. 補上Sam的修改紀錄
 a. Sam上傳了ntptime.py

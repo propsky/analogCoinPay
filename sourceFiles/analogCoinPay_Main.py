@@ -1,4 +1,4 @@
-VERSION = "SP2_V0.0610sd"
+VERSION = "SP2_V0.0731sa"
 
 import machine
 import binascii
@@ -484,90 +484,107 @@ Coin_IN1_last_falling_time = utime.ticks_ms()
 Coin_IN1_last_rising_time = utime.ticks_ms()
 Coin_IN2_last_falling_time = utime.ticks_ms()
 Coin_IN2_last_rising_time = utime.ticks_ms()
+Eyes_IRDIS_last_falling_time = utime.ticks_ms()
+Eyes_IRDIS_last_rising_time = utime.ticks_ms()
 Eyes_IROUT_last_falling_time = utime.ticks_ms()
 Eyes_IROUT_last_rising_time = utime.ticks_ms()
 Is_FEILOLI_eyes = 0
+PAYOUT_last_value = -1      # -1 代表未知狀態
+Coin_IN1_last_value = -1    # -1 代表未知狀態
+Coin_IN2_last_value = -1    # -1 代表未知狀態
 def GPI_interrupt_handler(pin):
-    
     if pin == GPIO_CardReader_PAYOUT :
-        global PAYOUT_last_falling_time, PAYOUT_last_rising_time
+        global PAYOUT_last_falling_time, PAYOUT_last_rising_time, PAYOUT_last_value
         PAYOUT_value = GPIO_CardReader_PAYOUT.value()
         PAYOUT_now_time = utime.ticks_ms()
-        print("PAYOUT收到中斷:", PAYOUT_value)
-        if PAYOUT_value == 0 :      # 1->0
-            PAYOUT_last_falling_time = PAYOUT_now_time
-        elif PAYOUT_value == 1 :    # 0->1
-            PAYOUT_rising_time = PAYOUT_now_time
-            PAYOUT_hipulse_time = PAYOUT_last_falling_time - PAYOUT_last_rising_time
-            PAYOUT_lowpulse_time = PAYOUT_rising_time - PAYOUT_last_falling_time
-            print("中斷PAYOUT收到Hi Pulse寬度(ms):", PAYOUT_hipulse_time, ",和Low Pulse寬度(ms):", PAYOUT_lowpulse_time)
-            if PAYOUT_hipulse_time >= 100 and (50 <= PAYOUT_lowpulse_time and PAYOUT_lowpulse_time <=200) :
-                # print("Pulse的Hi和Lo寬度都正確，啟動娃娃機遊戲。硬體已直通，暫不走韌體啟動")
-                print("Pulse的Hi和Lo寬度都正確，啟動娃娃機遊戲。")
-                global Rounds_of_Starting_games
-                Rounds_of_Starting_games = Rounds_of_Starting_games + 1
-                analog_claw_1.Number_of_Original_Payment = meter.inc_epay()
-                meter.save()
-                LCD_update_flag['Claw_Value'] = True
-            else :
-                print("Pulse的Hi或Lo寬度不正確，不進行任何動作")
-            PAYOUT_last_rising_time = PAYOUT_rising_time
+        if PAYOUT_last_value != PAYOUT_value :
+            PAYOUT_last_value = PAYOUT_value
+            print("PAYOUT收到中斷和變化:", PAYOUT_value)
+            if PAYOUT_value == 0 :      # 1->0
+                PAYOUT_last_falling_time = PAYOUT_now_time
+            elif PAYOUT_value == 1 :    # 0->1
+                PAYOUT_rising_time = PAYOUT_now_time
+                PAYOUT_hipulse_time = PAYOUT_last_falling_time - PAYOUT_last_rising_time
+                PAYOUT_lowpulse_time = PAYOUT_rising_time - PAYOUT_last_falling_time
+                print("中斷PAYOUT收到Hi Pulse寬度(ms):", PAYOUT_hipulse_time, ",和Low Pulse寬度(ms):", PAYOUT_lowpulse_time)
+                if PAYOUT_hipulse_time >= 100 and (50 <= PAYOUT_lowpulse_time and PAYOUT_lowpulse_time <=200) :
+                    # print("Pulse的Hi和Lo寬度都正確，啟動娃娃機遊戲。硬體已直通，暫不走韌體啟動")
+                    print("Pulse的Hi和Lo寬度都正確，啟動娃娃機遊戲。")
+                    global Rounds_of_Starting_games
+                    Rounds_of_Starting_games = Rounds_of_Starting_games + 1
+                    analog_claw_1.Number_of_Original_Payment = meter.inc_epay()
+                    meter.save()
+                    LCD_update_flag['Claw_Value'] = True
+                else :
+                    print("Pulse的Hi或Lo寬度不正確，不進行任何動作")
+                PAYOUT_last_rising_time = PAYOUT_rising_time
     
     if pin == GPI_Claw_Coin_IN1 :
-        global Coin_IN1_last_falling_time, Coin_IN1_last_rising_time
+        global Coin_IN1_last_falling_time, Coin_IN1_last_rising_time, Coin_IN1_last_value
         Coin_IN1_value = GPI_Claw_Coin_IN1.value()
         Coin_IN1_now_time = utime.ticks_ms()
-        print("Coin_IN1收到中斷:", Coin_IN1_value)
-        if Coin_IN1_value == 0 :      # 1->0
-            Coin_IN1_last_falling_time = Coin_IN1_now_time
-        elif Coin_IN1_value == 1 :    # 0->1
-            Coin_IN1_rising_time = Coin_IN1_now_time
-            Coin_IN1_hipulse_time = Coin_IN1_last_falling_time - Coin_IN1_last_rising_time
-            Coin_IN1_lowpulse_time = Coin_IN1_rising_time - Coin_IN1_last_falling_time
-            print("中斷Coin_IN1收到Hi Pulse寬度(ms):", Coin_IN1_hipulse_time, ",和Low Pulse寬度(ms):", Coin_IN1_lowpulse_time)
-            if Coin_IN1_hipulse_time >= 100 and (10 <= Coin_IN1_lowpulse_time and Coin_IN1_lowpulse_time <=200) :
-                print("Pulse的Hi和Lo寬度都正確，啟動娃娃機遊戲")
-                global Rounds_of_Starting_games
-                Rounds_of_Starting_games = Rounds_of_Starting_games + 1
-                analog_claw_1.Number_of_Coin  = meter.inc_in()
-                meter.save()
-                LCD_update_flag['Claw_Value'] = True
-            else :
-                print("Pulse的Hi或Lo寬度不正確，不進行任何動作")
-            Coin_IN1_last_rising_time = Coin_IN1_rising_time
+        if Coin_IN1_last_value != Coin_IN1_value :
+            Coin_IN1_last_value = Coin_IN1_value
+            print("Coin_IN1收到中斷和變化:", Coin_IN1_value)
+            if Coin_IN1_value == 0 :      # 1->0
+                Coin_IN1_last_falling_time = Coin_IN1_now_time
+            elif Coin_IN1_value == 1 :    # 0->1
+                Coin_IN1_rising_time = Coin_IN1_now_time
+                Coin_IN1_hipulse_time = Coin_IN1_last_falling_time - Coin_IN1_last_rising_time
+                Coin_IN1_lowpulse_time = Coin_IN1_rising_time - Coin_IN1_last_falling_time
+                print("中斷Coin_IN1收到Hi Pulse寬度(ms):", Coin_IN1_hipulse_time, ",和Low Pulse寬度(ms):", Coin_IN1_lowpulse_time)
+                if Coin_IN1_hipulse_time >= 100 and (10 <= Coin_IN1_lowpulse_time and Coin_IN1_lowpulse_time <=200) :
+                    print("Pulse的Hi和Lo寬度都正確，啟動娃娃機遊戲")
+                    global Rounds_of_Starting_games
+                    Rounds_of_Starting_games = Rounds_of_Starting_games + 1
+                    analog_claw_1.Number_of_Coin  = meter.inc_in()
+                    meter.save()
+                    LCD_update_flag['Claw_Value'] = True
+                else :
+                    print("Pulse的Hi或Lo寬度不正確，不進行任何動作")
+                Coin_IN1_last_rising_time = Coin_IN1_rising_time
     
     if pin == GPI_Claw_Coin_IN2 :
-        global Coin_IN2_last_falling_time, Coin_IN2_last_rising_time
+        global Coin_IN2_last_falling_time, Coin_IN2_last_rising_time, Coin_IN2_last_value
         Coin_IN2_value = GPI_Claw_Coin_IN2.value()
         Coin_IN2_now_time = utime.ticks_ms()
-        print("Coin_IN2收到中斷:", Coin_IN2_value)
-        if Coin_IN2_value == 0 :      # 1->0
-            Coin_IN2_last_falling_time = Coin_IN2_now_time
-        elif Coin_IN2_value == 1 :    # 0->1
-            Coin_IN2_rising_time = Coin_IN2_now_time
-            Coin_IN2_hipulse_time = Coin_IN2_last_falling_time - Coin_IN2_last_rising_time
-            Coin_IN2_lowpulse_time = Coin_IN2_rising_time - Coin_IN2_last_falling_time
-            print("中斷Coin_IN2收到Hi Pulse寬度(ms):", Coin_IN2_hipulse_time, ",和Low Pulse寬度(ms):", Coin_IN2_lowpulse_time)
-            if Coin_IN2_hipulse_time >= 100 and (10 <= Coin_IN2_lowpulse_time and Coin_IN2_lowpulse_time <=200) :
-                print("Pulse的Hi和Lo寬度都正確，啟動娃娃機遊戲")
-                global Rounds_of_Starting_games
-                Rounds_of_Starting_games = Rounds_of_Starting_games + 1
-                analog_claw_1.Number_of_Coin  = meter.inc_in()
-                meter.save()
-                LCD_update_flag['Claw_Value'] = True
-            else :
-                print("Pulse的Hi或Lo寬度不正確，不進行任何動作")
-            Coin_IN2_last_rising_time = Coin_IN2_rising_time
+        if Coin_IN2_last_value != Coin_IN2_value :
+            Coin_IN2_last_value = Coin_IN2_value
+            print("Coin_IN2收到中斷和變化:", Coin_IN2_value)
+            if Coin_IN2_value == 0 :      # 1->0
+                Coin_IN2_last_falling_time = Coin_IN2_now_time
+            elif Coin_IN2_value == 1 :    # 0->1
+                Coin_IN2_rising_time = Coin_IN2_now_time
+                Coin_IN2_hipulse_time = Coin_IN2_last_falling_time - Coin_IN2_last_rising_time
+                Coin_IN2_lowpulse_time = Coin_IN2_rising_time - Coin_IN2_last_falling_time
+                print("中斷Coin_IN2收到Hi Pulse寬度(ms):", Coin_IN2_hipulse_time, ",和Low Pulse寬度(ms):", Coin_IN2_lowpulse_time)
+                if Coin_IN2_hipulse_time >= 100 and (10 <= Coin_IN2_lowpulse_time and Coin_IN2_lowpulse_time <=200) :
+                    print("Pulse的Hi和Lo寬度都正確，啟動娃娃機遊戲")
+                    global Rounds_of_Starting_games
+                    Rounds_of_Starting_games = Rounds_of_Starting_games + 1
+                    analog_claw_1.Number_of_Coin  = meter.inc_in()
+                    meter.save()
+                    LCD_update_flag['Claw_Value'] = True
+                else :
+                    print("Pulse的Hi或Lo寬度不正確，不進行任何動作")
+                Coin_IN2_last_rising_time = Coin_IN2_rising_time
+    
+    if pin == GPI_Claw_Eyes_IRDIS :
+        global Eyes_IRDIS_last_falling_time, Eyes_IRDIS_last_rising_time, Is_FEILOLI_eyes
+        Eyes_IRDIS_value = GPI_Claw_Eyes_IRDIS.value()
+        Eyes_IRDIS_now_time = utime.ticks_ms()
+        print("Eyes_IRDIS_收到中斷:", Eyes_IRDIS_value)
+        if Eyes_IRDIS_value == 0 :      # 1->0
+            Eyes_IRDIS_last_falling_time = Eyes_IRDIS_now_time
+        elif Eyes_IRDIS_value == 1 :    # 0->1
+            Is_FEILOLI_eyes = 1         # IRDIS曾經拉Hi，代表這是飛絡力電眼
+            Eyes_IRDIS_last_rising_time = Eyes_IRDIS_now_time
     
     if pin == GPI_Claw_Eyes_IROUT :
-        global Eyes_IROUT_last_falling_time, Eyes_IROUT_last_rising_time, Is_FEILOLI_eyes
+        global Eyes_IROUT_last_falling_time, Eyes_IROUT_last_rising_time, Is_FEILOLI_eyes, Eyes_IRDIS_last_rising_time
         Eyes_IROUT_value = GPI_Claw_Eyes_IROUT.value()
         Eyes_IROUT_now_time = utime.ticks_ms()
-        Eyes_IRDIS_value = GPI_Claw_Eyes_IRDIS.value()
-        if  Eyes_IRDIS_value == 1 :
-            Is_FEILOLI_eyes = 1
         print("Eyes_IROUT收到中斷:", Eyes_IROUT_value)
-        print("Eyes_IRDIS:", Eyes_IRDIS_value)
         if Eyes_IROUT_value == 0 :      # 1->0
             Eyes_IROUT_falling_time = Eyes_IROUT_now_time
             if  Is_FEILOLI_eyes == 0 :
@@ -585,25 +602,18 @@ def GPI_interrupt_handler(pin):
         elif Eyes_IROUT_value == 1 :    # 0->1
             Eyes_IROUT_rising_time = Eyes_IROUT_now_time
             if  Is_FEILOLI_eyes == 1 :
+                Eyes_Enable_time = Eyes_IROUT_last_falling_time - Eyes_IRDIS_last_rising_time
                 Eyes_IROUT_hipulse_time = Eyes_IROUT_last_falling_time - Eyes_IROUT_last_rising_time
                 Eyes_IROUT_lowpulse_time = Eyes_IROUT_rising_time - Eyes_IROUT_last_falling_time
                 print("中斷Eyes_IROUT收到Hi Pulse寬度(ms):", Eyes_IROUT_hipulse_time, ",和Low Pulse寬度(ms):", Eyes_IROUT_lowpulse_time)
-                if Eyes_IROUT_hipulse_time >= 500 and (10 <= Eyes_IROUT_lowpulse_time and Eyes_IROUT_lowpulse_time <=800) : # 測試出飛絡力800ms以內算出獎
-                    print("飛絡力電眼Pulse的Hi和Lo寬度都正確，出獎+1")
+                if Eyes_Enable_time >= 500 and Eyes_IROUT_hipulse_time >= 500 and (10 <= Eyes_IROUT_lowpulse_time and Eyes_IROUT_lowpulse_time <=800) : # 測試出飛絡力800ms以內算出獎
+                    print("出表或飛絡力電眼Pulse的Hi和Lo寬度都正確，致能時間也正確，出獎+1")
                     analog_claw_1.Number_of_Award = meter.inc_out()
                     meter.save()
                     LCD_update_flag['Claw_Value'] = True
                 else :
-                    print("飛絡力電眼Pulse的Hi或Lo寬度不正確，不進行任何動作")
+                    print("出表或飛絡力電眼Pulse的Hi或Lo寬度不正確，或是致能時間不正確，不進行任何動作")
             Eyes_IROUT_last_rising_time = Eyes_IROUT_rising_time
-
-    '''
-    if pin == GPI_Claw_Fault_Detect :
-        Fault_Detect_value = GPI_Claw_Fault_Detect.value()
-        print("Fault_Detect收到中斷:", Fault_Detect_value)
-        GPIO_Setting_Coin_and_CardReader(Fault_Detect_value)
-    '''
-
        
 
 # 定義啟動娃娃機遊戲的函式
@@ -696,11 +706,22 @@ GPI_Claw_Eyes_IRDIS = machine.Pin(34, machine.Pin.IN)
 GPI_Claw_Eyes_IROUT = machine.Pin(35, machine.Pin.IN)
 GPI_Claw_Fault_Detect = machine.Pin(39, machine.Pin.IN)
 
+# 檢查GPIO初始值
+PAYOUT_last_value = GPIO_CardReader_PAYOUT.value()
+Coin_IN1_last_value = GPI_Claw_Coin_IN1.value()
+Coin_IN2_last_value = GPI_Claw_Coin_IN2.value()
+Eyes_IRDIS_value = GPI_Claw_Eyes_IRDIS.value()
+if Eyes_IRDIS_value == 1 :
+    Is_FEILOLI_eyes = 1         # IRDIS曾經拉Hi，代表這是飛絡力電眼
+print(f"Init GPIO配置: PAYOUT, Coin_IN1, Coin_IN2, Eyes_IRDIS, Is_FEILOLI_eyes")
+print(f"Read value: {PAYOUT_last_value}, {Coin_IN1_last_value}, {Coin_IN2_last_value}, {Eyes_IRDIS_value}, {Is_FEILOLI_eyes}" )
+
 # GPIO 中斷配置
 # 設定TV-1QR PAYOUT中斷，觸發條件為正緣和負緣
 GPIO_CardReader_PAYOUT.irq(trigger = ( machine.Pin.IRQ_FALLING | machine.Pin.IRQ_RISING ), handler = GPI_interrupt_handler)
 GPI_Claw_Coin_IN1.irq(trigger = ( machine.Pin.IRQ_FALLING | machine.Pin.IRQ_RISING ), handler = GPI_interrupt_handler)
 GPI_Claw_Coin_IN2.irq(trigger = ( machine.Pin.IRQ_FALLING | machine.Pin.IRQ_RISING ), handler = GPI_interrupt_handler)
+GPI_Claw_Eyes_IRDIS.irq(trigger = ( machine.Pin.IRQ_FALLING | machine.Pin.IRQ_RISING ), handler = GPI_interrupt_handler)
 GPI_Claw_Eyes_IROUT.irq(trigger = ( machine.Pin.IRQ_FALLING | machine.Pin.IRQ_RISING ), handler = GPI_interrupt_handler)
 # GPI_Claw_Fault_Detect.irq(trigger = ( machine.Pin.IRQ_FALLING | machine.Pin.IRQ_RISING ), handler = GPI_interrupt_handler)
 
