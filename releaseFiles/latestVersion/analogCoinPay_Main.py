@@ -1,4 +1,4 @@
-VERSION = "SP2_V0.0731sa"
+VERSION = "SP2_V0.0813sd"
 
 import machine
 import binascii
@@ -591,28 +591,27 @@ def GPI_interrupt_handler(pin):
                 Eyes_IROUT_lowpulse_time = Eyes_IROUT_last_rising_time - Eyes_IROUT_last_falling_time
                 Eyes_IROUT_hipulse_time = Eyes_IROUT_falling_time - Eyes_IROUT_last_rising_time
                 print("中斷Eyes_IROUT收到Low Pulse寬度(ms):", Eyes_IROUT_lowpulse_time, ",和Hi Pulse寬度(ms):", Eyes_IROUT_hipulse_time)
-                if Eyes_IROUT_lowpulse_time >= 500 and (10 <= Eyes_IROUT_hipulse_time and Eyes_IROUT_hipulse_time <=800) :
-                    print("通用電眼Pulse的Lo和Hi寬度都正確，出獎+1")
+                if Eyes_IROUT_lowpulse_time >= 1000 and (10 <= Eyes_IROUT_hipulse_time and Eyes_IROUT_hipulse_time <=800) :
+                    print("通用電眼Low Pulse->Hi Pulse，寬度都正確，出獎+1")
                     analog_claw_1.Number_of_Award = meter.inc_out()
                     meter.save()
                     LCD_update_flag['Claw_Value'] = True
                 else :
-                    print("通用電眼Pulse的Lo或Hi寬度不正確，不進行任何動作")
+                    print("通用電眼Low Pulse->Hi Pulse，寬度不正確，不進行任何動作")
             Eyes_IROUT_last_falling_time = Eyes_IROUT_falling_time
         elif Eyes_IROUT_value == 1 :    # 0->1
             Eyes_IROUT_rising_time = Eyes_IROUT_now_time
-            if  Is_FEILOLI_eyes == 1 :
-                Eyes_Enable_time = Eyes_IROUT_last_falling_time - Eyes_IRDIS_last_rising_time
-                Eyes_IROUT_hipulse_time = Eyes_IROUT_last_falling_time - Eyes_IROUT_last_rising_time
-                Eyes_IROUT_lowpulse_time = Eyes_IROUT_rising_time - Eyes_IROUT_last_falling_time
-                print("中斷Eyes_IROUT收到Hi Pulse寬度(ms):", Eyes_IROUT_hipulse_time, ",和Low Pulse寬度(ms):", Eyes_IROUT_lowpulse_time)
-                if Eyes_Enable_time >= 500 and Eyes_IROUT_hipulse_time >= 500 and (10 <= Eyes_IROUT_lowpulse_time and Eyes_IROUT_lowpulse_time <=800) : # 測試出飛絡力800ms以內算出獎
-                    print("出表或飛絡力電眼Pulse的Hi和Lo寬度都正確，致能時間也正確，出獎+1")
-                    analog_claw_1.Number_of_Award = meter.inc_out()
-                    meter.save()
-                    LCD_update_flag['Claw_Value'] = True
-                else :
-                    print("出表或飛絡力電眼Pulse的Hi或Lo寬度不正確，或是致能時間不正確，不進行任何動作")
+            Eyes_Enable_time = Eyes_IROUT_last_falling_time - Eyes_IRDIS_last_rising_time
+            Eyes_IROUT_hipulse_time = Eyes_IROUT_last_falling_time - Eyes_IROUT_last_rising_time
+            Eyes_IROUT_lowpulse_time = Eyes_IROUT_rising_time - Eyes_IROUT_last_falling_time
+            print("中斷Eyes_IROUT收到Hi Pulse寬度(ms):", Eyes_IROUT_hipulse_time, ",和Low Pulse寬度(ms):", Eyes_IROUT_lowpulse_time)
+            if Eyes_Enable_time >= 1000 and Eyes_IROUT_hipulse_time >= 1000 and (10 <= Eyes_IROUT_lowpulse_time and Eyes_IROUT_lowpulse_time <=800) : # 測試出飛絡力800ms以內算出獎
+                print("出表或飛絡力/通用電眼Hi Pulse->Low Pulse，寬度和致能時間都正確，出獎+1")
+                analog_claw_1.Number_of_Award = meter.inc_out()
+                meter.save()
+                LCD_update_flag['Claw_Value'] = True
+            else :
+                print("出表或飛絡力/通用電眼Hi Pulse->Low Pulse，寬度或致能時間不正確，不進行任何動作")
             Eyes_IROUT_last_rising_time = Eyes_IROUT_rising_time
        
 

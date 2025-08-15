@@ -1,5 +1,12 @@
 # code-change list
 
+**2025/8/13_SP2_V0.0813sd, Thomas**
+1. 修改電眼上數的條件：物品要離開電眼1秒鐘以上，接著物品遮住0.01~0.8秒，以上兩個都成立才上數
+2. 修改電眼中斷時的Log敘述
+3. 當通用電眼的PIN define反接時，IROUT會反向；所以此版開通 當判定為通用電眼時，常態Hi或常態Low，都能出獎+1
+4. 修改to-be-do list和push check list 
+* Based on smartpay2 7/31_SP2_V0.0731sa, Thomas
+---
 **2025/7/31_SP2_V0.0731sa, Thomas**
 1. 新增push check list(./push-check-list.md)
 2. Eyes_IRDIS新增進中斷，紀錄正緣和負緣的時間點，Is_FEILOLI_eyes改到此中斷進行判斷和修改
@@ -45,16 +52,17 @@ b. Sam更新了senko.py
 ---
 
 # to-be-do list
+
 1. 整合SPHP_HWv1(開心小卡B1)的檔案，除了acp_m.py以外的4個py檔，檢查差異是否都同步導入
 a. BN165DKBDriver.py => ok
 b. senko.py => ok
 c. wifimgr.py => 雖然已導入，但未確認功能差異
 d. main.py => 雖然已導入，但未確認功能差異，並且有新版需要再排入更新
+=> 已知狀況：當開機偵測到有otalist.dat，但是要ota的檔案是最新一致&不需要更新的，這種情況下 不會刪掉otalist。
+
 2. 繼續導入Sam20250505
-3. 確認OTA是否正常
-4. 修補小卡的重連機制，不嘗試連線時，想要完全關掉wifi模組
-5. 針對飛絡力電眼enable/disable變化時，重新判斷出獎訊號時間
-6. 確認OTA以下更新方式是否正常合理
+3. 修補小卡的重連機制，不嘗試連線時，想要完全關掉wifi模組
+
+4. 確認OTA以下更新方式是否正常合理
 a. 舊->新
 b. 新->新
-7. 正緣和負緣中斷，改成真的會依造以前準位狀態來判定是否真的有準位轉換
