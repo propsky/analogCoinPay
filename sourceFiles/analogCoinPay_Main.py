@@ -1,4 +1,4 @@
-VERSION = "SP2_V0.0813sd"
+VERSION = "SP2_V0.0825sd_AI"
 
 import machine
 import binascii
@@ -361,6 +361,79 @@ def publish_MQTT_claw_data(claw_data, MQTT_API_select, para1=""):  # 可以選�
     mq_json_str = ujson.dumps(MQTT_claw_data)
     publish_data(mq_client_1, mq_topic, mq_json_str)
 
+# ===== 診斷日志系統 (非阻塞版本) =====
+diagnostic_log_buffer = []  # 日志緩衝區
+MAX_LOG_BUFFER_SIZE = 10   # 最大緩衝10條日志
+
+def safe_time_diff(newer_time, older_time):
+    """安全的時間差計算，處理ESP32溢出問題"""
+    return utime.ticks_diff(newer_time, older_time)
+
+def queue_diagnostic_log(event_type, pin_name, pulse_data=None, result="", reason=""):
+    """將診斷日志加入緩衝區（中斷安全，非阻塞）"""
+    global diagnostic_log_buffer
+    
+    # 快速檢查，避免不必要的處理
+    if now_main_state.state != MainStatus.STANDBY_MQTT:
+        return
+    
+    try:
+        # 構建日志數據（最小化處理時間）
+        log_entry = {
+            "event": event_type,
+            "pin": pin_name,
+            "timestamp": utime.time(),
+            "uptime_ms": utime.ticks_ms(),
+            "result": result,
+            "reason": reason
+        }
+        
+        # 如果有脈波數據，加入詳細信息
+        if pulse_data:
+            log_entry.update(pulse_data)
+        
+        # 加入緩衝區（如果滿了，移除最舊的）
+        if len(diagnostic_log_buffer) >= MAX_LOG_BUFFER_SIZE:
+            diagnostic_log_buffer.pop(0)  # 移除最舊的日志
+        
+        diagnostic_log_buffer.append(log_entry)
+        
+        # 簡單的本地日志（快速）
+        print(f"LOG: {event_type}-{pin_name}-{result}")
+        
+    except Exception as e:
+        # 中斷中不能有複雜的錯誤處理
+        pass
+
+def process_diagnostic_log_buffer():
+    """在主循環中處理緩衝的日志（非中斷環境）"""
+    global diagnostic_log_buffer, mq_client_1
+    
+    # 只在MQTT連接正常且有日志時處理
+    if now_main_state.state != MainStatus.STANDBY_MQTT or not diagnostic_log_buffer:
+        return
+    
+    try:
+        # 批量處理，提高效率
+        logs_to_send = diagnostic_log_buffer[:5]  # 一次最多處理5條
+        diagnostic_log_buffer = diagnostic_log_buffer[5:]  # 移除已處理的
+        
+        macid = my_internet_data.mac_address
+        mq_topic = macid + '/' + token + '/diagnostic'
+        
+        for log_entry in logs_to_send:
+            try:
+                mq_json_str = ujson.dumps(log_entry)
+                publish_data(mq_client_1, mq_topic, mq_json_str)
+                utime.sleep_ms(10)  # 小延遲避免網路壅塞
+            except Exception as e:
+                print(f"診斷日志發送失敗: {e}")
+                break  # 如果發送失敗，停止處理後續日志
+                
+    except Exception as e:
+        print(f"日志緩衝處理錯誤: {e}")
+        diagnostic_log_buffer.clear()  # 清空緩衝區避免錯誤累積
+
 class analogClawData:
     def __init__(self):
         self.Number_of_Original_Payment = 0     # for 悠遊卡支付次數
@@ -500,23 +573,59 @@ def GPI_interrupt_handler(pin):
         if PAYOUT_last_value != PAYOUT_value :
             PAYOUT_last_value = PAYOUT_value
             print("PAYOUT收到中斷和變化:", PAYOUT_value)
+            
+            # 記錄中斷事件（非阻塞）
+            queue_diagnostic_log("interrupt", "PAYOUT", 
+                               {"gpio_value": PAYOUT_value, "interrupt_time": PAYOUT_now_time})
+            
             if PAYOUT_value == 0 :      # 1->0
                 PAYOUT_last_falling_time = PAYOUT_now_time
             elif PAYOUT_value == 1 :    # 0->1
                 PAYOUT_rising_time = PAYOUT_now_time
-                PAYOUT_hipulse_time = PAYOUT_last_falling_time - PAYOUT_last_rising_time
-                PAYOUT_lowpulse_time = PAYOUT_rising_time - PAYOUT_last_falling_time
+                # 使用安全的時間差計算
+                PAYOUT_hipulse_time = safe_time_diff(PAYOUT_last_falling_time, PAYOUT_last_rising_time)
+                PAYOUT_lowpulse_time = safe_time_diff(PAYOUT_rising_time, PAYOUT_last_falling_time)
                 print("中斷PAYOUT收到Hi Pulse寬度(ms):", PAYOUT_hipulse_time, ",和Low Pulse寬度(ms):", PAYOUT_lowpulse_time)
-                if PAYOUT_hipulse_time >= 100 and (50 <= PAYOUT_lowpulse_time and PAYOUT_lowpulse_time <=200) :
-                    # print("Pulse的Hi和Lo寬度都正確，啟動娃娃機遊戲。硬體已直通，暫不走韌體啟動")
+                
+                # 準備脈波數據用於診斷
+                pulse_data = {
+                    "hi_pulse_ms": PAYOUT_hipulse_time,
+                    "low_pulse_ms": PAYOUT_lowpulse_time,
+                    "hi_pulse_min": 100,
+                    "low_pulse_min": 50,
+                    "low_pulse_max": 200
+                }
+                
+                # 判斷脈波寬度是否符合要求
+                hi_pulse_ok = PAYOUT_hipulse_time >= 100
+                low_pulse_ok = (50 <= PAYOUT_lowpulse_time <= 200)
+                
+                if hi_pulse_ok and low_pulse_ok:
                     print("Pulse的Hi和Lo寬度都正確，啟動娃娃機遊戲。")
                     global Rounds_of_Starting_games
                     Rounds_of_Starting_games = Rounds_of_Starting_games + 1
                     analog_claw_1.Number_of_Original_Payment = meter.inc_epay()
                     meter.save()
                     LCD_update_flag['Claw_Value'] = True
+                    
+                    # 記錄成功的脈波（非阻塞）
+                    queue_diagnostic_log("card_pulse", "PAYOUT", pulse_data, "ACCEPTED", "脈波寬度符合要求")
                 else :
                     print("Pulse的Hi或Lo寬度不正確，不進行任何動作")
+                    
+                    # 分析具體的拒絕原因
+                    reasons = []
+                    if not hi_pulse_ok:
+                        reasons.append(f"Hi脈波過短({PAYOUT_hipulse_time}ms < 100ms)")
+                    if not low_pulse_ok:
+                        if PAYOUT_lowpulse_time < 50:
+                            reasons.append(f"Low脈波過短({PAYOUT_lowpulse_time}ms < 50ms)")
+                        elif PAYOUT_lowpulse_time > 200:
+                            reasons.append(f"Low脈波過長({PAYOUT_lowpulse_time}ms > 200ms)")
+                    
+                    reason_str = "; ".join(reasons)
+                    queue_diagnostic_log("card_pulse", "PAYOUT", pulse_data, "REJECTED", reason_str)
+                    
                 PAYOUT_last_rising_time = PAYOUT_rising_time
     
     if pin == GPI_Claw_Coin_IN1 :
@@ -526,22 +635,59 @@ def GPI_interrupt_handler(pin):
         if Coin_IN1_last_value != Coin_IN1_value :
             Coin_IN1_last_value = Coin_IN1_value
             print("Coin_IN1收到中斷和變化:", Coin_IN1_value)
+            
+            # 記錄中斷事件（非阻塞）
+            queue_diagnostic_log("interrupt", "Coin_IN1", 
+                               {"gpio_value": Coin_IN1_value, "interrupt_time": Coin_IN1_now_time})
+            
             if Coin_IN1_value == 0 :      # 1->0
                 Coin_IN1_last_falling_time = Coin_IN1_now_time
             elif Coin_IN1_value == 1 :    # 0->1
                 Coin_IN1_rising_time = Coin_IN1_now_time
-                Coin_IN1_hipulse_time = Coin_IN1_last_falling_time - Coin_IN1_last_rising_time
-                Coin_IN1_lowpulse_time = Coin_IN1_rising_time - Coin_IN1_last_falling_time
+                # 使用安全的時間差計算
+                Coin_IN1_hipulse_time = safe_time_diff(Coin_IN1_last_falling_time, Coin_IN1_last_rising_time)
+                Coin_IN1_lowpulse_time = safe_time_diff(Coin_IN1_rising_time, Coin_IN1_last_falling_time)
                 print("中斷Coin_IN1收到Hi Pulse寬度(ms):", Coin_IN1_hipulse_time, ",和Low Pulse寬度(ms):", Coin_IN1_lowpulse_time)
-                if Coin_IN1_hipulse_time >= 100 and (10 <= Coin_IN1_lowpulse_time and Coin_IN1_lowpulse_time <=200) :
+                
+                # 準備脈波數據用於診斷
+                pulse_data = {
+                    "hi_pulse_ms": Coin_IN1_hipulse_time,
+                    "low_pulse_ms": Coin_IN1_lowpulse_time,
+                    "hi_pulse_min": 100,
+                    "low_pulse_min": 10,
+                    "low_pulse_max": 200
+                }
+                
+                # 判斷脈波寬度是否符合要求
+                hi_pulse_ok = Coin_IN1_hipulse_time >= 100
+                low_pulse_ok = (10 <= Coin_IN1_lowpulse_time <= 200)
+                
+                if hi_pulse_ok and low_pulse_ok:
                     print("Pulse的Hi和Lo寬度都正確，啟動娃娃機遊戲")
                     global Rounds_of_Starting_games
                     Rounds_of_Starting_games = Rounds_of_Starting_games + 1
-                    analog_claw_1.Number_of_Coin  = meter.inc_in()
+                    analog_claw_1.Number_of_Coin = meter.inc_in()
                     meter.save()
                     LCD_update_flag['Claw_Value'] = True
+                    
+                    # 記錄成功的脈波（非阻塞）
+                    queue_diagnostic_log("coin_pulse", "Coin_IN1", pulse_data, "ACCEPTED", "脈波寬度符合要求")
                 else :
                     print("Pulse的Hi或Lo寬度不正確，不進行任何動作")
+                    
+                    # 分析具體的拒絕原因
+                    reasons = []
+                    if not hi_pulse_ok:
+                        reasons.append(f"Hi脈波過短({Coin_IN1_hipulse_time}ms < 100ms)")
+                    if not low_pulse_ok:
+                        if Coin_IN1_lowpulse_time < 10:
+                            reasons.append(f"Low脈波過短({Coin_IN1_lowpulse_time}ms < 10ms)")
+                        elif Coin_IN1_lowpulse_time > 200:
+                            reasons.append(f"Low脈波過長({Coin_IN1_lowpulse_time}ms > 200ms)")
+                    
+                    reason_str = "; ".join(reasons)
+                    queue_diagnostic_log("coin_pulse", "Coin_IN1", pulse_data, "REJECTED", reason_str)
+                    
                 Coin_IN1_last_rising_time = Coin_IN1_rising_time
     
     if pin == GPI_Claw_Coin_IN2 :
@@ -551,22 +697,59 @@ def GPI_interrupt_handler(pin):
         if Coin_IN2_last_value != Coin_IN2_value :
             Coin_IN2_last_value = Coin_IN2_value
             print("Coin_IN2收到中斷和變化:", Coin_IN2_value)
+            
+            # 記錄中斷事件（非阻塞）
+            queue_diagnostic_log("interrupt", "Coin_IN2", 
+                               {"gpio_value": Coin_IN2_value, "interrupt_time": Coin_IN2_now_time})
+            
             if Coin_IN2_value == 0 :      # 1->0
                 Coin_IN2_last_falling_time = Coin_IN2_now_time
             elif Coin_IN2_value == 1 :    # 0->1
                 Coin_IN2_rising_time = Coin_IN2_now_time
-                Coin_IN2_hipulse_time = Coin_IN2_last_falling_time - Coin_IN2_last_rising_time
-                Coin_IN2_lowpulse_time = Coin_IN2_rising_time - Coin_IN2_last_falling_time
+                # 使用安全的時間差計算
+                Coin_IN2_hipulse_time = safe_time_diff(Coin_IN2_last_falling_time, Coin_IN2_last_rising_time)
+                Coin_IN2_lowpulse_time = safe_time_diff(Coin_IN2_rising_time, Coin_IN2_last_falling_time)
                 print("中斷Coin_IN2收到Hi Pulse寬度(ms):", Coin_IN2_hipulse_time, ",和Low Pulse寬度(ms):", Coin_IN2_lowpulse_time)
-                if Coin_IN2_hipulse_time >= 100 and (10 <= Coin_IN2_lowpulse_time and Coin_IN2_lowpulse_time <=200) :
+                
+                # 準備脈波數據用於診斷
+                pulse_data = {
+                    "hi_pulse_ms": Coin_IN2_hipulse_time,
+                    "low_pulse_ms": Coin_IN2_lowpulse_time,
+                    "hi_pulse_min": 100,
+                    "low_pulse_min": 10,
+                    "low_pulse_max": 200
+                }
+                
+                # 判斷脈波寬度是否符合要求
+                hi_pulse_ok = Coin_IN2_hipulse_time >= 100
+                low_pulse_ok = (10 <= Coin_IN2_lowpulse_time <= 200)
+                
+                if hi_pulse_ok and low_pulse_ok:
                     print("Pulse的Hi和Lo寬度都正確，啟動娃娃機遊戲")
                     global Rounds_of_Starting_games
                     Rounds_of_Starting_games = Rounds_of_Starting_games + 1
-                    analog_claw_1.Number_of_Coin  = meter.inc_in()
+                    analog_claw_1.Number_of_Coin = meter.inc_in()
                     meter.save()
                     LCD_update_flag['Claw_Value'] = True
+                    
+                    # 記錄成功的脈波（非阻塞）
+                    queue_diagnostic_log("coin_pulse", "Coin_IN2", pulse_data, "ACCEPTED", "脈波寬度符合要求")
                 else :
                     print("Pulse的Hi或Lo寬度不正確，不進行任何動作")
+                    
+                    # 分析具體的拒絕原因
+                    reasons = []
+                    if not hi_pulse_ok:
+                        reasons.append(f"Hi脈波過短({Coin_IN2_hipulse_time}ms < 100ms)")
+                    if not low_pulse_ok:
+                        if Coin_IN2_lowpulse_time < 10:
+                            reasons.append(f"Low脈波過短({Coin_IN2_lowpulse_time}ms < 10ms)")
+                        elif Coin_IN2_lowpulse_time > 200:
+                            reasons.append(f"Low脈波過長({Coin_IN2_lowpulse_time}ms > 200ms)")
+                    
+                    reason_str = "; ".join(reasons)
+                    queue_diagnostic_log("coin_pulse", "Coin_IN2", pulse_data, "REJECTED", reason_str)
+                    
                 Coin_IN2_last_rising_time = Coin_IN2_rising_time
     
     if pin == GPI_Claw_Eyes_IRDIS :
@@ -772,6 +955,9 @@ while True:
         WDT_feed_flag = 0
         wdt.feed()
         print('WDT fed! 開機秒數:', utime.ticks_ms() / 1000)
+
+    # 處理診斷日志緩衝（非阻塞，在主循環中執行）
+    process_diagnostic_log_buffer()
 
     current_time = utime.ticks_ms()
     if (utime.ticks_diff(current_time, last_time) >= main_while_delay_seconds * 1000):
