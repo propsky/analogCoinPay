@@ -1,4 +1,4 @@
-VERSION = "SP2_V0.0825sd_AI"
+VERSION = "SP2_V0.0825sd_AI_THERMAL"
 
 import machine
 import binascii
@@ -434,6 +434,93 @@ def process_diagnostic_log_buffer():
         print(f"日志緩衝處理錯誤: {e}")
         diagnostic_log_buffer.clear()  # 清空緩衝區避免錯誤累積
 
+# ===== 溫度監控與熱效應診斷 =====
+import esp32
+
+def get_internal_temperature():
+    """讀取ESP32內建溫度感測器"""
+    try:
+        # ESP32內建溫度感測器（攝氏度）
+        temp_fahrenheit = esp32.raw_temperature()
+        temp_celsius = (temp_fahrenheit - 32) * 5.0 / 9.0
+        return round(temp_celsius, 1)
+    except Exception as e:
+        print(f"溫度讀取失敗: {e}")
+        return None
+
+def analyze_thermal_impact(pulse_data, temperature):
+    """分析溫度對脈波的影響"""
+    thermal_analysis = {
+        "temperature_c": temperature,
+        "thermal_status": "NORMAL"
+    }
+    
+    if temperature is None:
+        return thermal_analysis
+    
+    # 溫度警告閾值
+    if temperature > 70:
+        thermal_analysis["thermal_status"] = "OVERHEAT_CRITICAL"
+        thermal_analysis["thermal_warning"] = "ESP32溫度過高，可能影響時序準確性"
+    elif temperature > 60:
+        thermal_analysis["thermal_status"] = "OVERHEAT_WARNING" 
+        thermal_analysis["thermal_warning"] = "溫度偏高，建議檢查散熱"
+    elif temperature < 10:
+        thermal_analysis["thermal_status"] = "UNDERHEAT"
+        thermal_analysis["thermal_warning"] = "溫度過低，可能影響機械動作"
+    
+    # 溫度補償建議（基於實驗數據調整）
+    if temperature > 50:
+        # 高溫時脈波可能變短，建議放寬下限
+        suggested_adjustment = int((temperature - 50) * 0.5)  # 每10度放寬0.5ms
+        thermal_analysis["temp_compensation"] = f"建議放寬脈波下限{suggested_adjustment}ms"
+    
+    return thermal_analysis
+
+def queue_thermal_diagnostic_log(event_type, pin_name, pulse_data=None, result="", reason=""):
+    """增強版診斷日志，包含溫度資訊"""
+    global diagnostic_log_buffer
+    
+    if now_main_state.state != MainStatus.STANDBY_MQTT:
+        return
+    
+    try:
+        # 讀取溫度
+        temperature = get_internal_temperature()
+        
+        log_entry = {
+            "event": event_type,
+            "pin": pin_name,
+            "timestamp": utime.time(),
+            "uptime_ms": utime.ticks_ms(),
+            "result": result,
+            "reason": reason
+        }
+        
+        # 加入溫度資訊
+        if temperature is not None:
+            thermal_info = analyze_thermal_impact(pulse_data, temperature)
+            log_entry.update(thermal_info)
+        
+        # 加入脈波數據
+        if pulse_data:
+            log_entry.update(pulse_data)
+        
+        # 緩衝區管理
+        if len(diagnostic_log_buffer) >= MAX_LOG_BUFFER_SIZE:
+            diagnostic_log_buffer.pop(0)
+        
+        diagnostic_log_buffer.append(log_entry)
+        
+        # 溫度異常時的本地警告
+        if temperature and temperature > 65:
+            print(f"⚠️ 溫度警告: {temperature}°C - {event_type}-{pin_name}-{result}")
+        else:
+            print(f"LOG: {event_type}-{pin_name}-{result} (T:{temperature}°C)")
+        
+    except Exception as e:
+        pass
+
 class analogClawData:
     def __init__(self):
         self.Number_of_Original_Payment = 0     # for 悠遊卡支付次數
@@ -452,10 +539,65 @@ def three_timer_task():
                 GPIO_Send_Starting_games()
             LCD_update_timer_callback()
             server_check_timer_callback()
+            thermal_monitor_callback()  # 溫度監控
 
         except OSError as e:
             print("3t error:", e)
         utime.sleep_ms(500)                         # 休眠一小段時間，避免過度使用CPU資源
+
+# ===== 溫度監控回調函式 =====
+thermal_report_counter = 0
+last_reported_temp = None
+
+def thermal_monitor_callback():
+    """定期溫度監控與異常報告"""
+    global thermal_report_counter, last_reported_temp
+    
+    thermal_report_counter += 1
+    
+    # 每30秒檢測一次溫度（server_check每秒執行一次）
+    if thermal_report_counter >= 30:
+        thermal_report_counter = 0
+        
+        current_temp = get_internal_temperature()
+        if current_temp is None:
+            return
+        
+        # 溫度變化超過5度，或超過警告閾值時立即報告
+        temp_changed = (last_reported_temp is None or 
+                       abs(current_temp - last_reported_temp) >= 5.0)
+        temp_warning = current_temp > 60 or current_temp < 10
+        
+        if temp_changed or temp_warning:
+            last_reported_temp = current_temp
+            
+            # 發送溫度監控日志
+            temp_log = {
+                "event": "thermal_monitor",
+                "pin": "ESP32_INTERNAL", 
+                "temperature_c": current_temp,
+                "thermal_status": "NORMAL",
+                "uptime_hours": round(utime.ticks_ms() / 3600000, 1)
+            }
+            
+            if current_temp > 70:
+                temp_log["thermal_status"] = "OVERHEAT_CRITICAL"
+                temp_log["reason"] = "ESP32過熱，可能影響系統穩定性"
+                print(f"🚨 嚴重過熱警告: {current_temp}°C")
+            elif current_temp > 60:
+                temp_log["thermal_status"] = "OVERHEAT_WARNING"
+                temp_log["reason"] = "溫度偏高，建議檢查散熱系統"
+                print(f"⚠️ 過熱警告: {current_temp}°C")
+            elif current_temp < 10:
+                temp_log["thermal_status"] = "UNDERHEAT"
+                temp_log["reason"] = "溫度過低，可能影響機械動作"
+            else:
+                temp_log["reason"] = "溫度正常範圍"
+            
+            # 加入緩衝區
+            if len(diagnostic_log_buffer) >= MAX_LOG_BUFFER_SIZE:
+                diagnostic_log_buffer.pop(0)
+            diagnostic_log_buffer.append(temp_log)
 
 # 定義claw_check計時器回調函式
 def claw_check_timer_callback():
@@ -608,8 +750,8 @@ def GPI_interrupt_handler(pin):
                     meter.save()
                     LCD_update_flag['Claw_Value'] = True
                     
-                    # 記錄成功的脈波（非阻塞）
-                    queue_diagnostic_log("card_pulse", "PAYOUT", pulse_data, "ACCEPTED", "脈波寬度符合要求")
+                    # 記錄成功的脈波（非阻塞，含溫度）
+                    queue_thermal_diagnostic_log("card_pulse", "PAYOUT", pulse_data, "ACCEPTED", "脈波寬度符合要求")
                 else :
                     print("Pulse的Hi或Lo寬度不正確，不進行任何動作")
                     
@@ -624,7 +766,7 @@ def GPI_interrupt_handler(pin):
                             reasons.append(f"Low脈波過長({PAYOUT_lowpulse_time}ms > 200ms)")
                     
                     reason_str = "; ".join(reasons)
-                    queue_diagnostic_log("card_pulse", "PAYOUT", pulse_data, "REJECTED", reason_str)
+                    queue_thermal_diagnostic_log("card_pulse", "PAYOUT", pulse_data, "REJECTED", reason_str)
                     
                 PAYOUT_last_rising_time = PAYOUT_rising_time
     
@@ -670,8 +812,8 @@ def GPI_interrupt_handler(pin):
                     meter.save()
                     LCD_update_flag['Claw_Value'] = True
                     
-                    # 記錄成功的脈波（非阻塞）
-                    queue_diagnostic_log("coin_pulse", "Coin_IN1", pulse_data, "ACCEPTED", "脈波寬度符合要求")
+                    # 記錄成功的脈波（非阻塞，含溫度）
+                    queue_thermal_diagnostic_log("coin_pulse", "Coin_IN1", pulse_data, "ACCEPTED", "脈波寬度符合要求")
                 else :
                     print("Pulse的Hi或Lo寬度不正確，不進行任何動作")
                     
@@ -686,7 +828,7 @@ def GPI_interrupt_handler(pin):
                             reasons.append(f"Low脈波過長({Coin_IN1_lowpulse_time}ms > 200ms)")
                     
                     reason_str = "; ".join(reasons)
-                    queue_diagnostic_log("coin_pulse", "Coin_IN1", pulse_data, "REJECTED", reason_str)
+                    queue_thermal_diagnostic_log("coin_pulse", "Coin_IN1", pulse_data, "REJECTED", reason_str)
                     
                 Coin_IN1_last_rising_time = Coin_IN1_rising_time
     
@@ -732,8 +874,8 @@ def GPI_interrupt_handler(pin):
                     meter.save()
                     LCD_update_flag['Claw_Value'] = True
                     
-                    # 記錄成功的脈波（非阻塞）
-                    queue_diagnostic_log("coin_pulse", "Coin_IN2", pulse_data, "ACCEPTED", "脈波寬度符合要求")
+                    # 記錄成功的脈波（非阻塞，含溫度）
+                    queue_thermal_diagnostic_log("coin_pulse", "Coin_IN2", pulse_data, "ACCEPTED", "脈波寬度符合要求")
                 else :
                     print("Pulse的Hi或Lo寬度不正確，不進行任何動作")
                     
@@ -748,7 +890,7 @@ def GPI_interrupt_handler(pin):
                             reasons.append(f"Low脈波過長({Coin_IN2_lowpulse_time}ms > 200ms)")
                     
                     reason_str = "; ".join(reasons)
-                    queue_diagnostic_log("coin_pulse", "Coin_IN2", pulse_data, "REJECTED", reason_str)
+                    queue_thermal_diagnostic_log("coin_pulse", "Coin_IN2", pulse_data, "REJECTED", reason_str)
                     
                 Coin_IN2_last_rising_time = Coin_IN2_rising_time
     

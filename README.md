@@ -1,10 +1,13 @@
 # code-change list
 
-**2025/8/25_SP2_V0.0825sd_AI, Thomas+Claude**
+**2025/8/25_SP2_V0.0825sd_AI_THERMAL, Thomas+Claude**
 1. 新增MQTT診斷日志系統，即時監控投幣器脈波狀態
 2. 解決ESP32時間溢出問題，使用安全的時間差計算
 3. 實作非阻塞的日志緩衝機制，避免中斷處理延遲
 4. 提供詳細的脈波寬度分析和拒絕原因追蹤
+5. **新增溫度監控與熱效應診斷功能**
+6. **整合溫度資訊到每個脈波診斷日志**
+7. **實作智能溫度警報與補償建議機制**
 * Based on smartpay2 8/13_SP2_V0.0813sd, Thomas
 ---
 **2025/8/13_SP2_V0.0813sd, Thomas**
@@ -144,7 +147,40 @@ mosquitto_sub -h happycollect.propskynet.com -u myuser -P propskymqtt -t "A1B2C3
   "hi_pulse_min": 100,
   "low_pulse_min": 50,
   "low_pulse_max": 200,
+  "temperature_c": 45.2,
+  "thermal_status": "NORMAL",
   "timestamp": 1692950402
+}
+```
+
+#### 4. 溫度監控 (event: "thermal_monitor")
+```json
+{
+  "event": "thermal_monitor",
+  "pin": "ESP32_INTERNAL",
+  "temperature_c": 68.5,
+  "thermal_status": "OVERHEAT_WARNING",
+  "thermal_warning": "溫度偏高，建議檢查散熱系統",
+  "reason": "溫度偏高，建議檢查散熱系統",
+  "uptime_hours": 12.5,
+  "timestamp": 1692950403
+}
+```
+
+#### 5. 過熱脈波異常 (event: "coin_pulse")
+```json
+{
+  "event": "coin_pulse",
+  "pin": "Coin_IN1",
+  "result": "REJECTED",
+  "reason": "Low脈波過長(250ms > 200ms)",
+  "hi_pulse_ms": 120,
+  "low_pulse_ms": 250,
+  "temperature_c": 72.1,
+  "thermal_status": "OVERHEAT_CRITICAL",
+  "thermal_warning": "ESP32過熱，可能影響時序準確性",
+  "temp_compensation": "建議放寬脈波下限11ms",
+  "timestamp": 1692950404
 }
 ```
 
@@ -152,15 +188,20 @@ mosquitto_sub -h happycollect.propskynet.com -u myuser -P propskymqtt -t "A1B2C3
 
 | 欄位 | 說明 |
 |------|------|
-| `event` | 事件類型：interrupt/coin_pulse/card_pulse |
-| `pin` | 觸發的GPIO：Coin_IN1/Coin_IN2/PAYOUT |
+| `event` | 事件類型：interrupt/coin_pulse/card_pulse/thermal_monitor |
+| `pin` | 觸發的GPIO：Coin_IN1/Coin_IN2/PAYOUT/ESP32_INTERNAL |
 | `result` | 處理結果：ACCEPTED/REJECTED |
 | `reason` | 詳細原因說明 |
 | `hi_pulse_ms` | Hi電位持續時間（毫秒） |
 | `low_pulse_ms` | Low電位持續時間（毫秒） |
 | `*_pulse_min/max` | 設定的脈波寬度範圍 |
+| `temperature_c` | **ESP32內部溫度（攝氏度）** |
+| `thermal_status` | **溫度狀態：NORMAL/OVERHEAT_WARNING/OVERHEAT_CRITICAL/UNDERHEAT** |
+| `thermal_warning` | **溫度警告訊息** |
+| `temp_compensation` | **溫度補償建議** |
 | `timestamp` | UTC時間戳 |
 | `uptime_ms` | 設備開機時間（毫秒） |
+| `uptime_hours` | **設備運行時數（小時）** |
 
 ## 故障診斷指南
 
@@ -192,12 +233,44 @@ mosquitto_sub -h happycollect.propskynet.com -u myuser -P propskymqtt -t "A1B2C3
   - 忽大忽小 → 電源不穩或干擾
   - 極端值 → 硬體故障
 
+#### 4. **溫度相關問題診斷**
+**症狀**: `temperature_c > 60` 且同時有脈波 `REJECTED`
+
+**過熱影響分析**:
+```
+溫度範圍        熱效應等級    典型症狀
+<50°C          正常         無溫度影響
+50-60°C        輕微         偶發脈波異常
+60-70°C        警告         脈波REJECTED率增加
+70-80°C        嚴重         頻繁投幣失效
+>80°C          危險         系統可能不穩定
+```
+
+**診斷步驟**:
+1. **檢視溫度趨勢**: 溫度是否隨時間上升
+2. **關聯性分析**: 高溫時段的REJECTED率是否明顯增加
+3. **環境對比**: 室溫 vs ESP32溫度的差值
+4. **時間模式**: 午後或連續運行後問題是否加劇
+
+**過熱確認方法**:
+```bash
+# 篩選過熱時段的脈波異常
+mosquitto_sub -h server -u user -P pass -t "MAC/token/diagnostic" | jq 'select(.temperature_c > 65 and .result == "REJECTED")'
+
+# 統計溫度分布
+mosquitto_sub -h server -u user -P pass -t "MAC/token/diagnostic" | jq '.temperature_c' | sort -n
+```
+
 ### 長期監控建議
 
 1. **設定警報**: 當REJECTED率超過10%時發送通知
 2. **趨勢追蹤**: 記錄脈波寬度變化，預測硬體更換時機
 3. **定期檢查**: 每週檢視診斷日志，及早發現問題
 4. **現場驗證**: 當日志顯示異常時，現場測試投幣功能確認
+5. **🔥 溫度監控**: 設定溫度警報，當 `temperature_c > 65°C` 時通知
+6. **🔥 過熱預防**: 觀察溫度趨勢，預防性改善散熱系統
+7. **🔥 季節調整**: 夏季時降低脈波判定的嚴格程度
+8. **🔥 環境關聯**: 記錄環境溫度與設備溫度的關係
 
 ## 注意事項
 
@@ -205,3 +278,26 @@ mosquitto_sub -h happycollect.propskynet.com -u myuser -P propskymqtt -t "A1B2C3
 - 日志緩衝最多10條，超過會自動清除最舊的
 - 中斷處理採用非阻塞設計，不影響投幣器響應速度
 - 系統時間採用安全計算，避免ESP32溢出問題
+- **🔥 ESP32內建溫度感測器精度約±2°C，足夠診斷用途**
+- **🔥 溫度監控每30秒執行一次，不會影響系統性能**
+- **🔥 溫度補償建議僅供參考，實際調整需現場測試驗證**
+- **🔥 極端過熱(>80°C)可能導致ESP32系統不穩定，需立即處理**
+
+## 溫度與脈波異常關聯分析方法
+
+### 快速診斷指令
+```bash
+# 監控即時溫度與脈波狀態
+mosquitto_sub -h happycollect.propskynet.com -u myuser -P propskymqtt -t "YOUR_MAC/YOUR_TOKEN/diagnostic"
+
+# 僅顯示溫度異常事件
+mosquitto_sub -h happycollect.propskynet.com -u myuser -P propskymqtt -t "YOUR_MAC/YOUR_TOKEN/diagnostic" | jq 'select(.thermal_status != "NORMAL")'
+
+# 僅顯示高溫時的脈波拒絕事件
+mosquitto_sub -h happycollect.propskynet.com -u myuser -P propskymqtt -t "YOUR_MAC/YOUR_TOKEN/diagnostic" | jq 'select(.temperature_c > 60 and .result == "REJECTED")'
+```
+
+### 散熱改善建議
+1. **立即措施**: 加裝散熱片或提升通風
+2. **中期改善**: 調整設備安裝位置，遠離熱源
+3. **長期解決**: 設計更好的機箱散熱系統
