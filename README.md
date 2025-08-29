@@ -1,5 +1,13 @@
 # code-change list
 
+**2025/8/29_SP2_V0.0829sb, Thomas**
+1. pulse_time的時間寬度改用utime.ticks_diff(time2, time1)，可以避免utime.ticks_ms()溢位後的回繞問題
+2. pulse_time的名稱改成pulse_ms、Eyes_Enable_time改成Eyes_Enable_interval_ms，要和rising_time(utime.ticks_ms())作區別。
+3. 開機秒數:utime.ticks_ms() / 1000，改成使用get_uptime_str()函式，顯示成開機時間:d日 h時 m分 s.ss秒
+4. 因為新版analogCoinPay_Main.py程式太大執行不了，所以刪掉各種註解、重複部分用變數減少字數
+5. 修改to-be-do list
+* Based on smartpay2 8/13_SP2_V0.0813sd, Thomas
+---
 **2025/8/13_SP2_V0.0813sd, Thomas**
 1. 修改電眼上數的條件：物品要離開電眼1秒鐘以上，接著物品遮住0.01~0.8秒，以上兩個都成立才上數
 2. 修改電眼中斷時的Log敘述
@@ -62,7 +70,8 @@ d. main.py => 雖然已導入，但未確認功能差異，並且有新版需要
 
 2. 繼續導入Sam20250505
 3. 修補小卡的重連機制，不嘗試連線時，想要完全關掉wifi模組
+4. 加速Rounds_of_Starting_games的反應速度
 
-4. 確認OTA以下更新方式是否正常合理
+5. 確認OTA以下更新方式是否正常合理
 a. 舊->新
 b. 新->新
