@@ -1,7 +1,7 @@
 import network
 import socket
 import ure
-import time
+import utime
 import binascii
 import machine
 import random
@@ -11,6 +11,9 @@ class WiFiManager:
         """Wi-Fi 管理類，負責 Wi-Fi 連線 (STA) 並提供 AP 設定模式"""
         self.wifi = network.WLAN(network.STA_IF)
         self.wifi.active(True)
+
+        unique_id_hex = binascii.hexlify(machine.unique_id()[-3:]).decode().upper()
+        self.DHCP_NAME = "SmartPay_" + unique_id_hex        
 
         self.ap_ssid, self.ap_password = self.generate_ap_credentials()
 
@@ -53,7 +56,7 @@ class WiFiManager:
         """確保 Wi-Fi 連線被清除，避免 Wi-Fi 內部錯誤"""
         if self.wifi.isconnected():
             self.wifi.disconnect()
-            time.sleep(1)
+            utime.sleep(1)
         self.wifi.active(True)
 
     def connect(self, timeout=60, retry_interval=3):
@@ -74,6 +77,7 @@ class WiFiManager:
 
         print(f"嘗試連線 Wi-Fi {self.ssid} ...")
         self.disconnect()
+        self.wifi.config(dhcp_hostname=self.DHCP_NAME)
         self.wifi.connect(self.ssid, self.password)
         
         # 嘗試10次
@@ -82,11 +86,11 @@ class WiFiManager:
                 print("Wi-Fi 連線成功！")
                 return self.get_ip_mac()
             print(f"嘗試連線中... {retry+1}/10")
-            time.sleep(2)
+            utime.sleep(2)
 
         # print("Wi-Fi 嘗試連線10次失敗！啟動 AP 設定模式")
         # self.start_ap_web()
-        # print("Wi-Fi 失棄")
+
         return None
     
     def get_signal_strength(self):
@@ -159,7 +163,7 @@ class WiFiManager:
                         "Wi-Fi 設定成功！設備將重新啟動..."
                     )
                     client.send(response.encode('utf-8'))
-                    time.sleep(3)
+                    utime.sleep(3)
                     machine.reset()
                 else:
                     # 400 Bad Request 回應
@@ -255,4 +259,4 @@ class WiFiManager:
             return None
         except Exception as e:
             print("Google 時間 API 失敗:", e)
-            return None 
+            return None

@@ -1,6 +1,5 @@
-from utime import sleep
+import utime
 import os
-import senko
 from machine import SPI, Pin, WDT
 import network
 import ntptime
@@ -8,35 +7,30 @@ from BN165DKBDriver import readKBData
 import machine
 #　lcd 模組
 from lcd_manager import LCDManager
-#from wifi_manager import WiFiManager 
 from wifimgr import WiFiManager
 
-# GPIO配置
-
-# 卡機端的TV-1
+# GPIO配置:卡機端的TV-1配置，關掉卡機電源和刷卡功能
 GPO_CardReader_EPAY_EN = machine.Pin(2, machine.Pin.OUT)
 GPO_CardReader_EPAY_EN.value(0)
 GPO_CardReader_PAYINOUT_EN = machine.Pin(19, machine.Pin.OUT)
 GPO_CardReader_PAYINOUT_EN.value(0)
 GPO_CardReader_I2C_EN = machine.Pin(21, machine.Pin.OUT)
 GPO_CardReader_I2C_EN.value(0)
-# 以上關掉卡機電源和刷卡功能
-# 娃娃機端的投幣器電源配置
+
+# GPIO配置:娃娃機端的投幣器電源配置，關掉投幣器電源
 GPO_Claw_Coin_EN = machine.Pin(5, machine.Pin.OUT)
 GPO_Claw_Coin_EN.value(0)
-# 以上關掉投幣器電源
 
-# 165D键盘的四根数据线对应的GPIO
+# GPIO配置:74HC165的四個IO線配置和UDP-WiFi設定板的一個IO配置
 CP = Pin(0, Pin.OUT)
 CE = Pin(0, Pin.OUT)
 PL = Pin(32, Pin.OUT)
 Q7 = Pin(33, Pin.IN)
-
-LCD_EN = Pin(27, Pin.OUT, value=1)#第三個參數是預設輸出電 #LCD_EN.value(1)
-# keyMenu = Pin(0, Pin.IN, Pin.PULL_UP) #尚未使用先comment掉
-# keyU = Pin(36, Pin.IN, Pin.PULL_UP)
-# keyD = Pin(39, Pin.IN, Pin.PULL_UP)
 ESP32_TXD2_FEILOLI = Pin(17, Pin.IN)
+
+# GPIO配置:LCD的背光配置和啟動背光
+LCD_EN = machine.Pin(27, machine.Pin.OUT)
+LCD_EN.value(1)
 
 # 把st7735所有相關的模組都寫在lcd_manager
 # 獲取 LCD 單例singleton
@@ -48,8 +42,8 @@ lcd_mgr.fill()  # 使用預設顏色（黑色）
 lcd_mgr.draw_text(0, 0, fg=lcd_mgr.color.WHITE, bg=lcd_mgr.color.BLUE, bgmode=-1) 
 #bgmode預設是0 ==>使用預設的bgcolor 例如:.fill()所指定的
 #bgmode預設是-1 ==>使用當前參數所指定的bgcolor bg=lcd_mgr.color.BLUE
-
 lcd_mgr.show()
+
 gc.collect()
 print(gc.mem_free())
 
@@ -69,7 +63,7 @@ def UDP_Load_Wifi():
     station.connect(wifi_ssid, wifi_password)
 
     while not station.isconnected():
-        pass
+        utime.sleep_ms(200)
 
     print("Connected to Wi-Fi")
     print('\nConnected. Network config: ', station.ifconfig())
@@ -93,27 +87,30 @@ def UDP_Load_Wifi():
         lcd_mgr.show()
         with open('wifi.dat', "w") as f:
             f.write(data.decode('utf-8'))
-        sleep(3)
+        utime.sleep(3)
         machine.reset()
 
 
-if readKBData(1,CP,CE,PL,Q7)[0] == 0 :
+Data_74HC165 = readKBData(1, CP, CE, PL, Q7)
+print("74HC165:", Data_74HC165)
+if Data_74HC165[3] == 0 :
+    print("SW1被按下，結束程式")
+    import sys
+    sys.exit()
+elif Data_74HC165[0] == 0 :
     from mach_meter import MachMeter
     print("正在初始化 MachMeter，並且歸零。")
     meter = MachMeter()
     meter.reset_all_data()
     meter.save()
     print("SW4被按下，進入UDP load wifi")
-    #from utils import UDP_Load_Wifi
     UDP_Load_Wifi()
 elif ESP32_TXD2_FEILOLI.value() == 0 :
     print("ESP32_TXD2_FEILOLI被拉Low，進入UDP load wifi")
-    #from utils import UDP_Load_Wifi
     UDP_Load_Wifi()
 
-
-# sleep(3)
-sleep(60) # for 景新 中華 4G AP
+# utime.sleep(3)
+utime.sleep(60) # for 景新 中華 4G AP
 wdt=WDT(timeout=1000*60*5) 
 
 # =============================
@@ -136,10 +133,8 @@ else:
     print("No Wifi") 
     lcd_mgr.draw_text(0 , 16, text='No Wifi')
 
-
-
-# Main Code goes here, wlan is a working network.WLAN(STA_IF) instance.
-print("ESP OK")
+print("ESP Wi-Fi OK")
+gc.collect()
 print(gc.mem_free())    
 
 # =============================
@@ -168,8 +163,7 @@ def tw_ntp(must=False):
             return True
         except Exception as e:
             print(f"嘗試 {server} 失敗: {e}")
-            #sleep(1)
-            sleep(1)  # uniform(1, 3)隨機等待 1~3 秒，降低被封鎖的風險
+            utime.sleep(1)
             continue  # 不 return False，繼續嘗試下一個伺服器
     print("所有 NTP 伺服器皆無法同步，改用 HTTP 時間")
     # 用http做時間同步的備援
@@ -178,7 +172,8 @@ def tw_ntp(must=False):
 
 #這裡待做斷網測試 2025/05/05已加上
 if network_info:
-    tw_ntp(must=True)
+    tw_ntp(must=True) # Thomas發現must沒有作用
+    print("ESP NTP Time OK")
 
     # =============================
     # OTA更新相關
@@ -189,17 +184,14 @@ if network_info:
     # 取得目錄下的所有檔案和資料夾
     file_list = os.listdir()
     print(file_list)
+    gc.collect()
     print(gc.mem_free())
     # 檢查檔案是否存在
     if filename in file_list:
-        gc.collect()
-        print(gc.mem_free())
         # 在這邊要做讀取OTA列表，然後進行OTA的執行
-        print("OTA檔案存在")
-        import senko
+        print("OTA檔案存在, OTA checking files...")
         lcd_mgr.draw_text(0 , 16 * 3, text="OTAing...")
         lcd_mgr.show()
-        #debug test
         try:
             with open(filename) as f:
                 lines = f.readlines()[0].strip()
@@ -208,7 +200,7 @@ if network_info:
             # 移除字串中的雙引號和空格，然後使用逗號分隔字串
             file_list = [file.strip('"') for file in lines.split(',')]
 
-            # Senko初始化 執行ota 
+            import senko
             OTA = senko.Senko(
                 user="propsky",  # Required
                 repo="analogCoinPay",  # Required
@@ -218,15 +210,17 @@ if network_info:
             )
 
             gc.collect()
-            #print(f"Debugger:[main] 要進Senko {file_list}, {gc.mem_free()}")
+            print(gc.mem_free())
             if OTA.update():
-                print("Updated to the latest version! Rebooting...")
-                os.remove(filename)
-                # 這裡重啟 已經讓OTA更新 記憶體會恢復正常
-                machine.reset()
+                print("Updated to the latest version!")
+            else:
+                print("Cannot find new-changed files for OTA, or check error")
         except Exception as e:
-            print(f"Updated error! Rebooting... ,{e}")
-            os.remove(filename)
+            print(f"Updated error:{e}")
+
+        print("刪除OTA檔案, rebooting...")
+        os.remove(filename)
+        machine.reset()
     else:
         lcd_mgr.draw_text(0, 16 * 3 ,text="No OTA")
         lcd_mgr.show()
@@ -234,7 +228,7 @@ if network_info:
 
     print("ESP OTA OK")
 else:
-    print("No wifi No OTA!!!!")
+    print("No wifi, No OTA!!!!")
 # =============================
 # 運行主程式
 # =============================
@@ -242,13 +236,15 @@ while True:
     for i in range(3, 0, -1):
         lcd_mgr.draw_text(0, 16 * 3, text=f"CountDown...{str(i)}",bg=lcd_mgr.color.BLACK, bgmode=-1)
         lcd_mgr.show()
-        sleep(1)
+        utime.sleep(1)
 
+    # import micropython
     gc.collect()
+    print(gc.mem_free())
+    # micropython.mem_info()
     try:
         print("執行analogCoinPay_Main.py...")
-        #print("Debugger:[main.py] 執行Data_Collection_Main.py之前 記憶體:")
         execfile('analogCoinPay_Main.py')
     except Exception as e:
-        print("執行失敗，改跑Data_Collection_Main.mpy", e)
-        __import__('Data_Collection_Main.mpy')       
+        print("執行失敗:", e)
+        utime.sleep(5)

@@ -1,5 +1,17 @@
 # code-change list
 
+**2025/9/4_SP2_V0.20a, Thomas**
+1. main.py 大修改
+a. 整合開心小卡B1，和Branch main中Sam寫的"修正thomas版的main" committed on May 6。比對功能，以及導入較省記憶體的方式
+b. OTA更新機制修正刪除檔案和重開機
+c. 整理Log和註解
+b. from utime import sleep改成import utime，一步一步統一用法
+2. wifimgr.py 小修改
+a. import time改成import utime，一步一步統一用法
+b. DHCP_NAME = "SmartPay_" + MAC後六碼
+3. 修改to-be-do list
+* Based on smartpay2 8/29_SP2_V0.0829sb, Thomas
+---
 **2025/8/29_SP2_V0.0829sb, Thomas**
 1. pulse_time的時間寬度改用utime.ticks_diff(time2, time1)，可以避免utime.ticks_ms()溢位後的回繞問題
 2. pulse_time的名稱改成pulse_ms、Eyes_Enable_time改成Eyes_Enable_interval_ms，要和rising_time(utime.ticks_ms())作區別。
@@ -61,17 +73,33 @@ b. Sam更新了senko.py
 
 # to-be-do list
 
-1. 整合SPHP_HWv1(開心小卡B1)的檔案，除了acp_m.py以外的4個py檔，檢查差異是否都同步導入
-a. BN165DKBDriver.py => ok
-b. senko.py => ok
-c. wifimgr.py => 雖然已導入，但未確認功能差異
-d. main.py => 雖然已導入，但未確認功能差異，並且有新版需要再排入更新
-=> 已知狀況：當開機偵測到有otalist.dat，但是要ota的檔案是最新一致&不需要更新的，這種情況下 不會刪掉otalist。
+1. 修補小卡的重連機制，不嘗試連線時，想要完全關掉wifi模組
+=> 這樣也能解決main執行時都要延遲一分鐘才能繼續開機
 
-2. 繼續導入Sam20250505
-3. 修補小卡的重連機制，不嘗試連線時，想要完全關掉wifi模組
-4. 加速Rounds_of_Starting_games的反應速度
+2. 加速Rounds_of_Starting_games的反應速度
+
+3. 當IO的last_time太大時，自動清除
+# 在10秒檢查迴圈中
+if GPI_Claw_Coin_IN1.value() == 1:  # 投幣器待機(高電平)
+    current_time = utime.ticks_ms()
+    time_since_last_rising = utime.ticks_diff(current_time, Coin_IN1_last_rising_time)
+    
+    if time_since_last_rising > 24 * 60 * 60 * 1000:  # 超過1天
+        print("重設投幣時間基準，避免溢出問題")
+        Coin_IN1_last_rising_time = current_time - 1000
+
+4. senko讓AI改成可以跑mpy
 
 5. 確認OTA以下更新方式是否正常合理
 a. 舊->新
 b. 新->新
+
+6. 過一段營運時間後，再確認
+main.py 不導入Sam20250505以下這段，是否ok? 實測印出記憶體，看起來沒有幫助
+
+    try:
+        del ntptime
+        del WiFiManager
+    except Exception as e:
+        print("del error:", e)
+        pass
