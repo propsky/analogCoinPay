@@ -1,5 +1,6 @@
 import utime
-import os
+import uos
+import ujson
 from machine import SPI, Pin, WDT
 import network
 import ntptime
@@ -109,9 +110,49 @@ elif ESP32_TXD2_FEILOLI.value() == 0 :
     print("ESP32_TXD2_FEILOLI被拉Low，進入UDP load wifi")
     UDP_Load_Wifi()
 
-# utime.sleep(3)
-utime.sleep(60) # for 景新 中華 4G AP
 wdt=WDT(timeout=1000*60*5) 
+
+def read_boot_delay():
+    default_delay = 3
+    config_file = 'config.json'
+    try:
+        if config_file not in uos.listdir():
+            print(f"配置檔案 {config_file} 不存在，使用預設值")
+            return default_delay
+        
+        with open(config_file, 'r') as f:
+            config = ujson.load(f)
+            print(f"讀取配置檔案 {config_file} 成功")
+            
+        if 'boot_delay_sec' in config:
+            delay = config['boot_delay_sec']
+            if isinstance(delay, int): # 檢查是否為整數
+                if 1 <= delay <= 300:  # 限制在 1-300 秒範圍內
+                    print(f"從配置檔案讀取到開機延遲: {delay} 秒")
+                    return delay
+                else:
+                    print(f"延遲時間 {delay} 秒超出合理範圍 (1-300)，使用預設值")
+                    return default_delay
+            else:
+                print(f"delay值不是整數: {delay}，使用預設值")
+                return default_delay
+        else:
+            print("配置檔案中沒有找到 'boot_delay_sec' 欄位，使用預設值")
+            return default_delay
+        
+    except ujson.JSONDecodeError as e:
+        print(f"JSON格式錯誤: {e}，使用預設值")
+        return default_delay
+    except Exception as e:
+        print(f"讀取配置檔案時發生錯誤: {e}，使用預設值")
+        return default_delay
+
+# 讀取開機延遲設定
+delay_seconds = read_boot_delay()
+# 執行延遲
+print(f'開始延遲 {delay_seconds} 秒...')
+utime.sleep(delay_seconds)
+print('延遲完成！')
 
 # =============================
 # wifi連線
@@ -182,7 +223,7 @@ if network_info:
     filename = 'otalist.dat'
 
     # 取得目錄下的所有檔案和資料夾
-    file_list = os.listdir()
+    file_list = uos.listdir()
     print(file_list)
     gc.collect()
     print(gc.mem_free())
@@ -219,7 +260,7 @@ if network_info:
             print(f"Updated error:{e}")
 
         print("刪除OTA檔案, rebooting...")
-        os.remove(filename)
+        uos.remove(filename)
         machine.reset()
     else:
         lcd_mgr.draw_text(0, 16 * 3 ,text="No OTA")

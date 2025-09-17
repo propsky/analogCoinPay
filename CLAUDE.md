@@ -8,7 +8,7 @@ ESP32 Smart Pay Board 2024 - MicroPython-based payment system for claw machines 
 
 **Hardware**: ESP32 microcontroller  
 **Language**: MicroPython  
-**Current Version**: SP2_V0.20a  
+**Current Version**: SP2_V0.30b  
 **Main Branch**: main  
 **Development Branch**: SP2_HWv1
 
@@ -16,9 +16,10 @@ ESP32 Smart Pay Board 2024 - MicroPython-based payment system for claw machines 
 
 ### Core Components
 
-- **analogCoinPay_Main.py** (810 lines): Main business logic, MQTT communication, state machine, hardware control
-- **main.py** (254 lines): System initialization, GPIO setup, WiFi connection, emergency stop handling  
-- **wifimgr.py** (262 lines): WiFi management, AP mode configuration, web interface for WiFi setup
+- **analogCoinPay_Main.py** (816 lines): Main business logic, MQTT communication, state machine, hardware control
+- **main.py** (254 lines): System initialization, GPIO setup, WiFi connection, emergency stop handling
+- **wifimgr.py**: WiFi management, AP mode configuration, web interface for WiFi setup
+- **config.json**: System configuration (boot delay, etc.)
 - **Hardware Drivers**: BN165DKBDriver.py (keypad), lcd_manager.py (ST7735 LCD), mach_meter.py (counters)
 
 ### State Machine Architecture
@@ -49,6 +50,18 @@ Key hardware interfaces defined in main.py:
 4. **Archive**: Create versioned ZIP file in `releaseFiles/`
 5. **Documentation**: Update README.md with change log following the established format
 
+### Deployment Commands
+
+**Development Workflow:**
+```bash
+# 1. Update version in analogCoinPay_Main.py (line 1)
+# 2. Test changes on hardware
+# 3. Deploy to OTA release directory
+cp sourceFiles/* releaseFiles/latestVersion/
+# 4. Create versioned backup
+cd releaseFiles && zip -r SP2_V[version].zip latestVersion/
+```
+
 ### Push Checklist (from push-check-list.md)
 
 Before committing changes:
@@ -69,9 +82,10 @@ Before committing changes:
 ### Key Timing Considerations
 
 - **utime module**: Used throughout for timing (避免溢位問題)
-- **Pulse Detection**: Eye sensor timing critical (0.01-0.8s for valid detection)
-- **WiFi Delays**: 60-second delay on startup for 4G router initialization
+- **Pulse Detection**: Eye sensor timing critical (0.01-0.8s for valid detection), PAYOUT pulse 5-300ms (version dependent)
+- **WiFi Delays**: Configurable startup delay via config.json boot_delay_sec (default 60s for 4G router, can be reduced to 1s for development)
 - **Watchdog**: Regular WDT clearing required for system stability
+- **Overflow Protection**: Use `utime.ticks_diff()` to handle timer overflow in pulse measurements
 
 ### MQTT Integration
 
@@ -96,7 +110,7 @@ Dual-mode operation:
 ### Critical Safety Features
 
 - **Emergency Stop**: SW1 button triggers immediate `sys.exit()`
-- **Power Control**: Automatic shutdown of card reader and coin acceptor during OTA
+- **Power Control**: Automatic shutdown of card reader and coin acceptor during OTA (via safe_reboot() function)
 - **Hardware Monitoring**: Continuous monitoring of claw machine fault detection
 - **Interrupt Handling**: Debounced interrupt processing for coin detection and payout signals
 
@@ -104,13 +118,42 @@ Dual-mode operation:
 
 ```
 ├── sourceFiles/           # Development source code
-├── releaseFiles/          
-│   ├── latestVersion/     # OTA deployment files  
+│   ├── analogCoinPay_Main.py  # Main application logic
+│   ├── main.py               # System initialization
+│   ├── config.json           # System configuration
+│   ├── wifimgr.py           # WiFi management
+│   ├── senko.py             # OTA update handler
+│   └── *.py                 # Hardware drivers and utilities
+├── releaseFiles/
+│   ├── latestVersion/     # OTA deployment files
 │   ├── SP2_V*.zip        # Version archives
 │   └── *_ChangeList.md   # Version change documentation
 ├── push-check-list.md     # Pre-commit checklist
 └── README.md             # Version history and todo list
 ```
+
+## Recent Improvements (SP2_V0.30b)
+
+### Code Quality Enhancements
+- **Syntax Fixes**: Resolved global variable declaration issues in interrupt handlers
+- **Module Standardization**: Unified import statements to use `uos` instead of `os` for MicroPython compatibility
+- **Safe Reboot Function**: Added `safe_reboot()` for graceful system shutdown with hardware power control
+
+### Configuration System
+- **Dynamic Boot Delay**: Configurable startup delay via `config.json` (`boot_delay_sec` parameter)
+- **Development Mode**: Reduced startup time from 60s to 1s for faster development cycles
+- **Production Mode**: Maintains 60s delay for 4G router compatibility
+
+### Performance Optimizations
+- **Memory Management**: Improved garbage collection and resource cleanup
+- **Interrupt Handling**: Enhanced debouncing and pulse detection algorithms
+- **State Management**: Refined fault detection with -1 initial state for better error handling
+
+### PAYOUT Detection Changes
+**Important**: PAYOUT pulse detection window has been modified:
+- **Previous**: 50-200ms Low pulse detection
+- **Current**: 5-300ms Low pulse detection (reverted for compatibility)
+- This change improves hardware compatibility but may affect detection sensitivity
 
 ## Hardware Dependencies
 

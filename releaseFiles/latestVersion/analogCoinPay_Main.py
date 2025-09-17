@@ -1,4 +1,4 @@
-VERSION = "SP2_V0.20a"
+VERSION = "SP2_V0.30b"
 
 import machine
 import binascii
@@ -9,7 +9,7 @@ import network
 import ujson
 import gc
 from machine import WDT
-import os
+import uos
 from mach_meter import MachMeter
 
 # 定義狀態類型
@@ -170,15 +170,8 @@ def subscribe_MQTT_claw_recive_callback(topic, message):
                     publish_MQTT_claw_data(analog_claw_1, 'fotaack')                    
                     with open(otafile, "w") as f:
                         f.write(''.join(data['file_list']))
-                    print("otafile 輸出完成，即將重開機...")
-                    # 關掉卡機電源和刷卡功能
-                    GPO_CardReader_EPAY_EN.value(0)
-                    GPO_CardReader_PAYINOUT_EN.value(0)
-                    GPO_CardReader_I2C_EN.value(0)
-                    # 關掉投幣器電源
-                    GPO_Claw_Coin_EN.value(0)
-                    utime.sleep(3)
-                    machine.reset()
+                    print("otafile 輸出完成")
+                    safe_reboot()
                 else:
                     print("password failed")
         elif topic.decode() == (mq_topic + '/commands'):
@@ -234,7 +227,7 @@ def publish_data(mq_client, topic, data):
 
 def get_file_info(filename):
     try:
-        file_stat = os.stat(filename)
+        file_stat = uos.stat(filename)
         file_size = file_stat[6]  # Index 6:file size
         file_mtime = file_stat[8]  # Index 8:modification time
         return file_size, file_mtime
@@ -301,15 +294,12 @@ def publish_MQTT_claw_data(claw_data, MQTT_API_select, para1=""):  # 可以選�
         file_date = ""
         file_size = 0
         try:
-            file_stat = os.stat(file_name)
+            file_stat = uos.stat(file_name)
             file_size, file_mtime = get_file_info(file_name)
             if file_size is not None:
                 if file_mtime is not None:
                     formatted_date = utime.localtime(file_mtime)
-                    formatted_date_str = "{:04d}-{:02d}-{:02d} {:02d}:{:02d}:{:02d}".format(
-                        formatted_date[0], formatted_date[1], formatted_date[2],
-                        formatted_date[3], formatted_date[4], formatted_date[5]
-                    )
+                    formatted_date_str = "%04d-%02d-%02d %02d:%02d:%02d" % formatted_date[:6]
                     file_date=formatted_date_str
                     file_exist=1
                 else:
@@ -331,9 +321,9 @@ def publish_MQTT_claw_data(claw_data, MQTT_API_select, para1=""):  # 可以選�
         file_name = para1
         result=""
         try:
-            file_stat = os.stat(file_name)
+            file_stat = uos.stat(file_name)
             if file_name != "main.py":
-                os.remove(para1)
+                uos.remove(para1)
                 result="remove ok"
             else:
                 result="CAN NOT REMOVE main.py"
@@ -358,7 +348,7 @@ class analogClawData:
         self.Number_of_Award = 0                # for 禮品出獎次數
         self.Error_Code_of_Machine = 99         # for 機台故障代碼表
  
-# 定義virtual timer 軟體計時器回調函式 (每1秒執行1次)
+# 定義virtual timer 軟體計時器回調函式 (每0.2秒執行1次)
 def three_timer_task():
     while True:
         try:
@@ -370,8 +360,9 @@ def three_timer_task():
 
         except OSError as e:
             print("3t error:", e)
-        utime.sleep_ms(500)                         # 休眠一小段時間，避免過度使用CPU資源
+        utime.sleep_ms(200)                         # 休眠一小段時間，避免過度使用CPU資源
 
+Fault_Detect_last_value = -1   # -1 代表未知狀態
 # 定義claw_check計時器回調函式
 def claw_check_timer_callback():
     # print("Updating 娃娃機 機台狀態 ...")
@@ -380,7 +371,7 @@ def claw_check_timer_callback():
     if Fault_Detect_value != Fault_Detect_last_value:
         print("Fault_Detect改變成:", Fault_Detect_value)
         GPIO_Setting_Coin_and_CardReader(Fault_Detect_value)
-    Fault_Detect_last_value = Fault_Detect_value
+        Fault_Detect_last_value = Fault_Detect_value
 
 # 定義LCD_update計時器回調函式
 def LCD_update_timer_callback():
@@ -422,13 +413,13 @@ def LCD_update_timer_callback():
     elif (LCD_update_flag['Time']): # 顯示時間
         LCD_update_flag['Time'] = False  
         timestamp = utime.time()
-        local_time = utime.localtime(timestamp) # 转换为本地时间
+        local_time = utime.localtime(timestamp) # 轉換為本地時間
         # 格式化为 "mm/dd hh:mm" 格式的字符串
-        formatted_time = "{:02d}/{:02d} {:02d}:{:02d}".format(local_time[1], local_time[2], local_time[3], local_time[4])
+        formatted_time = "%02d/%02d %02d:%02d" % local_time[1:5]
         lcd_mgr.draw_text(5 * 8, 6 * 16, text=formatted_time, bgmode=-1)
         lcd_mgr.show()
 
-# 定義server_check計時器回調函式 (每1秒執行1次)
+# 定義server_check計時器回調函式 (每0.2秒執行1次)
 def server_check_timer_callback():
     global WDT_feed_flag, mq_client_1, server_report_flag
     if now_main_state.state == MainStatus.STANDBY_MQTT:
@@ -478,6 +469,9 @@ PAYOUT_last_value = -1   # -1 代表未知狀態
 Coin_IN1_last_value = -1
 Coin_IN2_last_value = -1
 def GPI_interrupt_handler(pin):
+    global Rounds_of_Starting_games
+    global Eyes_IRDIS_last_rising_time, Is_FEILOLI_eyes
+
     if pin == GPIO_CardReader_PAYOUT :
         global PAYOUT_last_falling_time, PAYOUT_last_rising_time, PAYOUT_last_value
         PAYOUT_value = GPIO_CardReader_PAYOUT.value()
@@ -492,9 +486,8 @@ def GPI_interrupt_handler(pin):
                 PAYOUT_hipulse_ms = utime.ticks_diff(PAYOUT_last_falling_time, PAYOUT_last_rising_time)
                 PAYOUT_lowpulse_ms = utime.ticks_diff(PAYOUT_rising_time, PAYOUT_last_falling_time)
                 print("中斷PAYOUT收到Hi Pulse寬度(ms):", PAYOUT_hipulse_ms, ",和Low Pulse寬度(ms):", PAYOUT_lowpulse_ms)
-                if PAYOUT_hipulse_ms >= 100 and (50 <= PAYOUT_lowpulse_ms and PAYOUT_lowpulse_ms <=200) :
+                if PAYOUT_hipulse_ms >= 50 and (5 <= PAYOUT_lowpulse_ms <= 300) :
                     print("Pulse的Hi和Lo寬度都正確，啟動娃娃機遊戲。") # print("硬體已直通，暫不走韌體啟動")
-                    global Rounds_of_Starting_games
                     Rounds_of_Starting_games = Rounds_of_Starting_games + 1
                     analog_claw_1.Number_of_Original_Payment = meter.inc_epay()
                     meter.save()
@@ -517,9 +510,8 @@ def GPI_interrupt_handler(pin):
                 Coin_IN1_hipulse_ms = utime.ticks_diff(Coin_IN1_last_falling_time, Coin_IN1_last_rising_time)
                 Coin_IN1_lowpulse_ms = utime.ticks_diff(Coin_IN1_rising_time, Coin_IN1_last_falling_time)
                 print("中斷Coin_IN1收到Hi Pulse寬度(ms):", Coin_IN1_hipulse_ms, ",和Low Pulse寬度(ms):", Coin_IN1_lowpulse_ms)
-                if Coin_IN1_hipulse_ms >= 100 and (10 <= Coin_IN1_lowpulse_ms and Coin_IN1_lowpulse_ms <=200) :
+                if Coin_IN1_hipulse_ms >= 50 and (5 <= Coin_IN1_lowpulse_ms <= 300):
                     print("Pulse的Hi和Lo寬度都正確，啟動娃娃機遊戲")
-                    global Rounds_of_Starting_games
                     Rounds_of_Starting_games = Rounds_of_Starting_games + 1
                     analog_claw_1.Number_of_Coin  = meter.inc_in()
                     meter.save()
@@ -542,9 +534,8 @@ def GPI_interrupt_handler(pin):
                 Coin_IN2_hipulse_ms = utime.ticks_diff(Coin_IN2_last_falling_time, Coin_IN2_last_rising_time)
                 Coin_IN2_lowpulse_ms = utime.ticks_diff(Coin_IN2_rising_time, Coin_IN2_last_falling_time)
                 print("中斷Coin_IN2收到Hi Pulse寬度(ms):", Coin_IN2_hipulse_ms, ",和Low Pulse寬度(ms):", Coin_IN2_lowpulse_ms)
-                if Coin_IN2_hipulse_ms >= 100 and (10 <= Coin_IN2_lowpulse_ms and Coin_IN2_lowpulse_ms <=200) :
+                if Coin_IN2_hipulse_ms >= 50 and (5 <= Coin_IN2_lowpulse_ms <= 300):
                     print("Pulse的Hi和Lo寬度都正確，啟動娃娃機遊戲")
-                    global Rounds_of_Starting_games
                     Rounds_of_Starting_games = Rounds_of_Starting_games + 1
                     analog_claw_1.Number_of_Coin  = meter.inc_in()
                     meter.save()
@@ -554,7 +545,7 @@ def GPI_interrupt_handler(pin):
                 Coin_IN2_last_rising_time = Coin_IN2_rising_time
     
     if pin == GPI_Claw_Eyes_IRDIS :
-        global Eyes_IRDIS_last_falling_time, Eyes_IRDIS_last_rising_time, Is_FEILOLI_eyes
+        global Eyes_IRDIS_last_falling_time
         Eyes_IRDIS_value = GPI_Claw_Eyes_IRDIS.value()
         Eyes_IRDIS_now_time = utime.ticks_ms()
         print("Eyes_IRDIS_收到中斷:", Eyes_IRDIS_value)
@@ -565,7 +556,7 @@ def GPI_interrupt_handler(pin):
             Eyes_IRDIS_last_rising_time = Eyes_IRDIS_now_time
     
     if pin == GPI_Claw_Eyes_IROUT :
-        global Eyes_IROUT_last_falling_time, Eyes_IROUT_last_rising_time, Is_FEILOLI_eyes, Eyes_IRDIS_last_rising_time
+        global Eyes_IROUT_last_falling_time, Eyes_IROUT_last_rising_time
         Eyes_IROUT_value = GPI_Claw_Eyes_IROUT.value()
         Eyes_IROUT_now_time = utime.ticks_ms()
         print("Eyes_IROUT收到中斷:", Eyes_IROUT_value)
@@ -575,7 +566,7 @@ def GPI_interrupt_handler(pin):
                 Eyes_IROUT_lowpulse_ms = utime.ticks_diff(Eyes_IROUT_last_rising_time, Eyes_IROUT_last_falling_time)
                 Eyes_IROUT_hipulse_ms = utime.ticks_diff(Eyes_IROUT_falling_time, Eyes_IROUT_last_rising_time)
                 print("中斷Eyes_IROUT收到Low Pulse寬度(ms):", Eyes_IROUT_lowpulse_ms, ",和Hi Pulse寬度(ms):", Eyes_IROUT_hipulse_ms)
-                if Eyes_IROUT_lowpulse_ms >= 1000 and (10 <= Eyes_IROUT_hipulse_ms and Eyes_IROUT_hipulse_ms <=800) :
+                if Eyes_IROUT_lowpulse_ms >= 1000 and (10 <= Eyes_IROUT_hipulse_ms <= 800):
                     print("通用電眼Low Pulse->Hi Pulse，寬度都正確，出獎+1")
                     analog_claw_1.Number_of_Award = meter.inc_out()
                     meter.save()
@@ -589,7 +580,7 @@ def GPI_interrupt_handler(pin):
             Eyes_IROUT_hipulse_ms = utime.ticks_diff(Eyes_IROUT_last_falling_time, Eyes_IROUT_last_rising_time)
             Eyes_IROUT_lowpulse_ms = utime.ticks_diff(Eyes_IROUT_rising_time, Eyes_IROUT_last_falling_time)
             print("中斷Eyes_IROUT收到Hi Pulse寬度(ms):", Eyes_IROUT_hipulse_ms, ",和Low Pulse寬度(ms):", Eyes_IROUT_lowpulse_ms)
-            if Eyes_Enable_interval_ms >= 1000 and Eyes_IROUT_hipulse_ms >= 1000 and (10 <= Eyes_IROUT_lowpulse_ms and Eyes_IROUT_lowpulse_ms <=800) : # 測試出飛絡力800ms以內算出獎
+            if Eyes_Enable_interval_ms >= 1000 and Eyes_IROUT_hipulse_ms >= 1000 and (10 <= Eyes_IROUT_lowpulse_ms <= 800): # 測試出飛絡力800ms以內算出獎
                 print("出表或飛絡力/通用電眼Hi Pulse->Low Pulse，寬度和致能時間都正確，出獎+1")
                 analog_claw_1.Number_of_Award = meter.inc_out()
                 meter.save()
@@ -605,13 +596,13 @@ def GPIO_Send_Starting_games():
     print('GPIO_Send_Starting_games (次):', Rounds_of_Starting_games)
     while Rounds_of_Starting_games > 0:
         GPO_Claw_CoinPayOUT.value(1)
-#        utime.sleep_ms(500)
+        utime.sleep_ms(1)
         GPO_Claw_CoinPayOUT.value(0)
         utime.sleep_ms(50)
         GPO_Claw_CoinPayOUT.value(1)
         Rounds_of_Starting_games = Rounds_of_Starting_games -1
         if Rounds_of_Starting_games > 0:
-            utime.sleep_ms(100)
+            utime.sleep_ms(99)
 
 # 定義偵測娃娃機故障處理的函式
 def GPIO_Setting_Coin_and_CardReader(Is_Fault):
@@ -627,6 +618,16 @@ def GPIO_Setting_Coin_and_CardReader(Is_Fault):
             analog_claw_1.Error_Code_of_Machine = (analog_claw_1.Error_Code_of_Machine-24)/100
     LCD_update_flag['Claw_State'] = True
 
+def safe_reboot():
+    print("準備重開機，先關閉卡機和投幣器電源...")
+    # 關掉卡機電源和刷卡功能
+    GPO_CardReader_EPAY_EN.value(0)
+    GPO_CardReader_PAYINOUT_EN.value(0)
+    GPO_CardReader_I2C_EN.value(0)
+    # 關掉投幣器電源
+    GPO_Claw_Coin_EN.value(0)
+    utime.sleep(3)
+    machine.reset()
 
 total_uptime_seconds = 0.0
 last_check_time = 0
@@ -689,7 +690,7 @@ print('2開機秒數:', utime.ticks_ms() / 1000)
 # 卡機端的TV-1、觸控按鈕配置
 GPIO_CardReader_PAYOUT = machine.Pin(25, machine.Pin.IN)
 GPO_CardReader_EPAY_EN = machine.Pin(2, machine.Pin.OUT)
-GPO_CardReader_EPAY_EN.value(0)
+GPO_CardReader_EPAY_EN.value(0) # 依照Fault_Detect決定要不要開通
 GPO_CardReader_PAYINOUT_EN = machine.Pin(19, machine.Pin.OUT)
 GPO_CardReader_PAYINOUT_EN.value(1) # 先直接開通
 GPO_CardReader_I2C_EN = machine.Pin(21, machine.Pin.OUT)
@@ -699,7 +700,7 @@ GPO_CardReader_I2C_EN.value(0)      # 還沒有使用過，先不開通
 GPI_Claw_Coin_IN1 = machine.Pin(16, machine.Pin.IN)
 GPI_Claw_Coin_IN2 = machine.Pin(18, machine.Pin.IN)
 GPO_Claw_Coin_EN = machine.Pin(5, machine.Pin.OUT)
-GPO_Claw_Coin_EN.value(1) # 先直接開通，未來後台決定是否開通投幣器功能
+GPO_Claw_Coin_EN.value(0) # 依照Fault_Detect決定要不要開通
 GPO_Claw_CoinPayOUT = machine.Pin(26, machine.Pin.OPEN_DRAIN)
 GPO_Claw_CoinPayOUT.value(1)
 GPI_Claw_Eyes_IRDIS = machine.Pin(34, machine.Pin.IN)
@@ -748,11 +749,6 @@ except Exception as e:
 LCD_update_flag['Claw_Value'] = True
 LCD_update_flag['Claw_State'] = True
 
- # 第一次偵測娃娃機是否故障
-Fault_Detect_value = GPI_Claw_Fault_Detect.value()
-print("Fault_Detect:", Fault_Detect_value)
-GPIO_Setting_Coin_and_CardReader(Fault_Detect_value)
-Fault_Detect_last_value = Fault_Detect_value
 
 # 創建 MQTT Client 1 資料
 mq_client_1 = None
@@ -775,6 +771,16 @@ while True:
         print('WDT fed! 開機時間:', get_uptime_str())
 
     current_time = utime.ticks_ms()
+
+    current_days = current_time // (1000 * 60 * 60 * 24)
+    if current_days >= 3 and  utime.localtime()[3] == 3:  
+        safe_reboot()   # 開機超過3天，並且是早上3點時，進行重開機
+    '''
+    current_hours = current_time // (1000 * 60 * 60)
+    if current_hours >= 3 and  utime.localtime()[4] == 30:    
+        safe_reboot()   # 開機超過3小時，並且是整點後的30分鐘時，進行重開機。debug用，下次開機是XX:30
+    '''
+
     if (utime.ticks_diff(current_time, last_time) >= main_while_delay_seconds * 1000):
         last_time = current_time
 
@@ -797,14 +803,12 @@ while True:
                     now_main_state.transition('MQTT is OK')
                 except:
                     print('MQTT subscription has failed')
-            gc.collect()
-            print(gc.mem_free())
         elif now_main_state.state == MainStatus.STANDBY_MQTT:
             print('\n\rnow_main_state: MQTT is OK, 開機時間:', get_uptime_str())
-            gc.collect()
-            print(gc.mem_free())
         else:
             print('\n\rInvalid action! now_main_state:', now_main_state.state)
             print('開機時間:', get_uptime_str())
 
+        gc.collect()
+        print(gc.mem_free())
         LCD_update_flag['Time'] = True
