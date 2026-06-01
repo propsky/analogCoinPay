@@ -1,0 +1,15 @@
+SP2_QR_test0413c
+	可以在analogCoinPay.py裡面讀到QR掃描器
+
+
+SP2_mpy_QR_test0415c
+	1. 因在analogCoinPay.py太大，改成analogCoinPay.mpy
+	2. 可以在analogCoinPay.mpy裡面讀到QR掃描器
+	3. QR掃描器讀到UUID後，會發MQTT events資料到後台
+
+SP2_mpy_QR_test0415f
+	1. 沿用SP2_mpy_QR_test0415c
+	2. 發生出獎時，會發MQTT events資料到後台
+
+
+TAGE展覽最終版本為: SP2_mpy_QR_test0415f

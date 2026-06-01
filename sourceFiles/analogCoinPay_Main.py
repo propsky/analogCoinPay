@@ -1,4 +1,4 @@
-VERSION = "SP2_V0.30b"
+VERSION = "SP2_mpy_QR_test0415f"
 
 import machine
 import binascii
@@ -11,6 +11,7 @@ import gc
 from machine import WDT
 import uos
 from mach_meter import MachMeter
+from lcd_manager import LCDManager
 
 # 定義狀態類型
 class MainStatus:
@@ -57,17 +58,6 @@ class MainStateMachine:
             print('\n\rAction: MQTT is OK, MainStatus: STANDBY_MQTT')
             main_while_delay_seconds = 10
             LCD_update_flag['WiFi'] = True
-
-            ''' # 這作法不順利，先不用
-            elif action == 'MQTT is disconnect':
-                self.state = MainStatus.NONE_MQTT
-                # 以下執行"MQTT失敗後"相應的操作
-                print('\n\rAction: MQTT is disconnect, MainStatus: NONE_MQTT')
-                mq_client_1.disconnect()
-                now_main_state.transition('WiFi is disconnect')
-                main_while_delay_seconds = 1
-                LCD_update_flag['WiFi'] = True
-            '''
 
         else:
             print('\n\rInvalid action:', action, 'for current state:', self.state)
@@ -228,13 +218,13 @@ def publish_data(mq_client, topic, data):
 def get_file_info(filename):
     try:
         file_stat = uos.stat(filename)
-        file_size = file_stat[6]  # Index 6:file size
-        file_mtime = file_stat[8]  # Index 8:modification time
+        file_size = file_stat[6]
+        file_mtime = file_stat[8]
         return file_size, file_mtime
     except OSError:
         return None, None
 
-def publish_MQTT_claw_data(claw_data, MQTT_API_select, para1=""):  # 可以選擇analog_claw_1、claw_2、...，但MQTT_client暫時固定為mq_client_1
+def publish_MQTT_claw_data(claw_data, MQTT_API_select, para1=""):  # MQTT_client暫時固定為mq_client_1
     global wifi
     macid = my_internet_data.mac_address
     mq_topic = macid + '/' + token
@@ -335,7 +325,21 @@ def publish_MQTT_claw_data(claw_data, MQTT_API_select, para1=""):  # 可以選�
             "ack": "OK",
             "result" : result,
             "time": utime.time()
-        }              
+        }
+    elif MQTT_API_select == 'events-qrscan':
+        mq_topic = mq_topic + '/events'
+        MQTT_claw_data = {
+            "events": "qrscan",
+            "uuid": para1,
+            "time": utime.time()
+        }
+    elif MQTT_API_select == 'events-giftout':
+        mq_topic = mq_topic + '/events'
+        MQTT_claw_data = {
+            "events": "GiftOut",
+            "GiftOutQty": para1,
+            "time": utime.time()
+        }
     mq_json_str = ujson.dumps(MQTT_claw_data)
     publish_data(mq_client_1, mq_topic, mq_json_str)
 
@@ -347,7 +351,36 @@ class analogClawData:
         self.Number_of_Coin = 0                 # for 投幣次數
         self.Number_of_Award = 0                # for 禮品出獎次數
         self.Error_Code_of_Machine = 99         # for 機台故障代碼表
- 
+
+server_event_QRScan_flag = 0
+server_event_QRScan_uuid = ""
+server_event_GiftOut_Count = 0
+
+def uart_QRScanner_recive_packet_task():    # 讀取並處理掃碼器資料的執行緒
+    print("二維掃碼器接收執行緒已啟動")
+    while True:
+        try:
+            if uart_QRScanner.any():
+                receive_data = uart_QRScanner.read()
+                if receive_data:
+                    # 解碼成字串
+                    qr_string = receive_data.decode('utf-8').strip()
+                    print(f"Receive string from QRScanner: \"{qr_string}\"")
+                    len_qr_string = len(qr_string)
+                    if len_qr_string == 36:
+                        global server_event_QRScan_flag, server_event_QRScan_uuid
+                        if Fault_Detect_last_value != 0:  # 故障或未知狀態，不處理
+                            print(f"娃娃機故障或狀態未知，忽略QR掃碼器的UUID")
+                        else:
+                            server_event_QRScan_uuid = qr_string
+                            server_event_QRScan_flag = 1
+                            print(f"QR掃碼器成功掃到 UUID，即將發送到 MQTT Broker")
+                    else:
+                        print(f"QR Code的長度不對: {len_qr_string}")
+        except Exception as e:
+            print(f"QRScanner執行緒例外: {e}")
+        utime.sleep_ms(100)  # 休眠一小段時間，避免過度使用CPU資源
+
 # 定義virtual timer 軟體計時器回調函式 (每0.2秒執行1次)
 def three_timer_task():
     while True:
@@ -421,12 +454,23 @@ def LCD_update_timer_callback():
 
 # 定義server_check計時器回調函式 (每0.2秒執行1次)
 def server_check_timer_callback():
-    global WDT_feed_flag, mq_client_1, server_report_flag
+    global WDT_feed_flag, mq_client_1, server_report_flag, server_event_QRScan_flag, server_event_QRScan_uuid, server_event_GiftOut_Count
     if now_main_state.state == MainStatus.STANDBY_MQTT:
         try:
             # 更新 MQTT Subscribe
             mq_client_1.check_msg()
             #mq_client_1.ping()
+
+            if server_event_QRScan_flag:
+                server_event_QRScan_flag = 0
+                publish_MQTT_claw_data(analog_claw_1, 'events-qrscan', server_event_QRScan_uuid)
+                WDT_feed_flag = 1
+
+            if server_event_GiftOut_Count > 0:
+                GiftOutQty = server_event_GiftOut_Count
+                server_event_GiftOut_Count = 0
+                publish_MQTT_claw_data(analog_claw_1, 'events-giftout', GiftOutQty)
+                WDT_feed_flag = 1
 
             if server_report_flag == 1:
                 server_report_flag = 0
@@ -556,7 +600,7 @@ def GPI_interrupt_handler(pin):
             Eyes_IRDIS_last_rising_time = Eyes_IRDIS_now_time
     
     if pin == GPI_Claw_Eyes_IROUT :
-        global Eyes_IROUT_last_falling_time, Eyes_IROUT_last_rising_time
+        global Eyes_IROUT_last_falling_time, Eyes_IROUT_last_rising_time, server_event_GiftOut_Count
         Eyes_IROUT_value = GPI_Claw_Eyes_IROUT.value()
         Eyes_IROUT_now_time = utime.ticks_ms()
         print("Eyes_IROUT收到中斷:", Eyes_IROUT_value)
@@ -569,6 +613,7 @@ def GPI_interrupt_handler(pin):
                 if Eyes_IROUT_lowpulse_ms >= 1000 and (10 <= Eyes_IROUT_hipulse_ms <= 800):
                     print("通用電眼Low Pulse->Hi Pulse，寬度都正確，出獎+1")
                     analog_claw_1.Number_of_Award = meter.inc_out()
+                    server_event_GiftOut_Count += 1
                     meter.save()
                     LCD_update_flag['Claw_Value'] = True
                 else :
@@ -583,6 +628,7 @@ def GPI_interrupt_handler(pin):
             if Eyes_Enable_interval_ms >= 1000 and Eyes_IROUT_hipulse_ms >= 1000 and (10 <= Eyes_IROUT_lowpulse_ms <= 800): # 測試出飛絡力800ms以內算出獎
                 print("出表或飛絡力/通用電眼Hi Pulse->Low Pulse，寬度和致能時間都正確，出獎+1")
                 analog_claw_1.Number_of_Award = meter.inc_out()
+                server_event_GiftOut_Count += 1
                 meter.save()
                 LCD_update_flag['Claw_Value'] = True
             else :
@@ -619,11 +665,11 @@ def GPIO_Setting_Coin_and_CardReader(Is_Fault):
     LCD_update_flag['Claw_State'] = True
 
 def safe_reboot():
-    print("準備重開機，先關閉卡機和投幣器電源...")
-    # 關掉卡機電源和刷卡功能
+    print("準備重開機，先關閉卡機/掃碼器和投幣器電源...")
+    # 三者皆設為0，關掉刷卡功能和各訊號開關，同時切斷卡機TV-1和掃碼器電源
     GPO_CardReader_EPAY_EN.value(0)
     GPO_CardReader_PAYINOUT_EN.value(0)
-    GPO_CardReader_I2C_EN.value(0)
+    GPO_QRScanner_UART_EN.value(0)
     # 關掉投幣器電源
     GPO_Claw_Coin_EN.value(0)
     utime.sleep(3)
@@ -687,14 +733,22 @@ LCD_update_flag = {
 print('2開機秒數:', utime.ticks_ms() / 1000)
 
 # GPIO配置
-# 卡機端的TV-1、觸控按鈕配置
+# 卡機TV-1和掃碼器端的配置：PAYOUT訊號、EPAY_EN/PAYINOUT_EN/UART_EN（三者皆0才切斷電源）
 GPIO_CardReader_PAYOUT = machine.Pin(25, machine.Pin.IN)
+
 GPO_CardReader_EPAY_EN = machine.Pin(2, machine.Pin.OUT)
-GPO_CardReader_EPAY_EN.value(0) # 依照Fault_Detect決定要不要開通
+GPO_CardReader_EPAY_EN.value(0) # 告訴卡機TV-1啟動或關閉刷卡功能，依照Fault_Detect決定
 GPO_CardReader_PAYINOUT_EN = machine.Pin(19, machine.Pin.OUT)
-GPO_CardReader_PAYINOUT_EN.value(1) # 先直接開通
-GPO_CardReader_I2C_EN = machine.Pin(21, machine.Pin.OUT)
-GPO_CardReader_I2C_EN.value(0)      # 還沒有使用過，先不開通
+GPO_CardReader_PAYINOUT_EN.value(1) # 卡機訊號開關，先直接開通，讓卡機可以開機
+GPO_QRScanner_UART_EN = machine.Pin(21, machine.Pin.OUT)
+GPO_QRScanner_UART_EN.value(1)      # 掃碼器訊號開關，先直接固定開通
+
+# 二維掃碼器的UART配置
+uart_QRScanner = machine.UART(1, baudrate=115200, tx=22, rx=23)
+# 建立並執行 uart_QRScanner_recive_packet_task
+_thread.start_new_thread(uart_QRScanner_recive_packet_task, ())
+print("二維掃碼器已就緒，等待掃碼...")
+
 
 # 娃娃機端的投幣器、電眼配置
 GPI_Claw_Coin_IN1 = machine.Pin(16, machine.Pin.IN)

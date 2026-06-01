@@ -8,19 +8,21 @@ ESP32 Smart Pay Board 2024 - MicroPython-based payment system for claw machines 
 
 **Hardware**: ESP32 microcontroller  
 **Language**: MicroPython  
-**Current Version**: SP2_V0.30b  
+**Current Version**: SP2_QR branch (based on SP2_V0.30b)  
 **Main Branch**: main  
-**Development Branch**: SP2_HWv1
+**Development Branch**: SP2_HWv1  
+**MicroPython Firmware**: v1.18-9-gd8e35d0e0-dirty (2022-02-19)
 
 ## Architecture
 
 ### Core Components
 
-- **analogCoinPay_Main.py** (816 lines): Main business logic, MQTT communication, state machine, hardware control
-- **main.py** (254 lines): System initialization, GPIO setup, WiFi connection, emergency stop handling
+- **analogCoinPay_Main.py / .mpy**: Main business logic, MQTT communication, state machine, hardware control, QR scanner UART handling. 部署時使用 .mpy（預編譯 bytecode）以解決記憶體限制問題
+- **main.py**: System initialization, GPIO setup, WiFi connection, emergency stop handling. 先嘗試 execfile .py，失敗則 fallback 到 __import__ .mpy
 - **wifimgr.py**: WiFi management, AP mode configuration, web interface for WiFi setup
 - **config.json**: System configuration (boot delay, etc.)
 - **Hardware Drivers**: BN165DKBDriver.py (keypad), lcd_manager.py (ST7735 LCD), mach_meter.py (counters)
+- **mqtt-events-spec.md**: MQTT events 封包定義文件（qrscan、GiftOut）
 
 ### State Machine Architecture
 
@@ -34,11 +36,15 @@ MainStateMachine in analogCoinPay_Main.py manages system states:
 ### GPIO Configuration
 
 Key hardware interfaces defined in main.py:
-- Card Reader Control: Pins 2, 19, 21 (power and functionality control)
+- **GPO_CardReader_EPAY_EN** (Pin 2): 告訴卡機TV-1啟動或關閉刷卡功能
+- **GPO_CardReader_PAYINOUT_EN** (Pin 19): 卡機訊號開關
+- **GPO_QRScanner_UART_EN** (Pin 21): 掃碼器訊號開關（走UART）
+- 電源邏輯：三者皆為0時才切斷卡機TV-1和掃碼器電源，只要有一個為1就維持供電
 - Coin Acceptor: Pin 5 (power control)
 - 74HC165 Shift Register: Pins 0, 32, 33 (keypad input)
 - LCD Control: Pin 27 (backlight enable)
 - Emergency Stop: SW1 via 74HC165 Data[3]
+- QR Scanner UART: TX=22, RX=23, baudrate=115200
 
 ## Development Workflow
 
@@ -56,11 +62,19 @@ Key hardware interfaces defined in main.py:
 ```bash
 # 1. Update version in analogCoinPay_Main.py (line 1)
 # 2. Test changes on hardware
-# 3. Deploy to OTA release directory
+# 3. Compile .mpy (MicroPython v1.18, mpy-cross v1.18.0)
+mpy-cross sourceFiles/analogCoinPay_Main.py -o sourceFiles/analogCoinPay_Main.mpy
+# 4. Deploy to OTA release directory
 cp sourceFiles/* releaseFiles/latestVersion/
-# 4. Create versioned backup
+# 5. Create versioned backup
 cd releaseFiles && zip -r SP2_V[version].zip latestVersion/
 ```
+
+**MPY 編譯注意事項：**
+- 使用 `pip install mpy-cross==1.18.0`
+- .mpy 版本必須和韌體版本一致（v1.18），否則會報 `invalid mpy file`
+- 每次修改 analogCoinPay_Main.py 後都需要重新編譯 .mpy
+- main.py 不能編譯成 .mpy（開機只認 main.py）
 
 ### Push Checklist (from push-check-list.md)
 
@@ -94,11 +108,23 @@ System publishes to MQTT broker with topics based on unique ESP32 ID:
 - OTA updates triggered via MQTT commands
 - Hardware state monitoring and remote control
 
+**MQTT Events（即時事件封包）：**
+Topic: `{cardid}/{token}/events`，訂閱用 `+/+/events`，以 `events` 欄位區分類型。
+- `qrscan`：QR 掃碼通知，payload 含 `uuid`（36字元）和 `time`
+- `GiftOut`：出獎通知，payload 含 `GiftOutQty`（可累積）和 `time`
+- 詳見 `mqtt-events-spec.md`
+
+**MQTT Event Flags 命名規則：**
+`server_event_[功能]_flag` 或 `server_event_[功能]_Count`，統一在 `server_check_timer_callback()` 裡發送。
+
 ### Memory Management
 
 - Explicit garbage collection (`gc.collect()`) after major operations
 - Memory monitoring during development
 - Module cleanup after initialization to free RAM
+- **analogCoinPay_Main.py 因檔案過大（~37KB）在 ESP32 上記憶體碎片化無法直接執行**，需編譯成 .mpy（~17KB）使用
+- main.py 執行邏輯：先 `execfile('analogCoinPay_Main.py')`，失敗則 `__import__('analogCoinPay_Main')`（載入 .mpy）
+- analogCoinPay_Main.py 必須自己 import LCDManager（`from lcd_manager import LCDManager`），不能依賴 main.py 的 namespace
 
 ### WiFi Management
 
@@ -119,6 +145,7 @@ Dual-mode operation:
 ```
 ├── sourceFiles/           # Development source code
 │   ├── analogCoinPay_Main.py  # Main application logic
+│   ├── analogCoinPay_Main.mpy # 預編譯 bytecode（部署用）
 │   ├── main.py               # System initialization
 │   ├── config.json           # System configuration
 │   ├── wifimgr.py           # WiFi management
@@ -128,6 +155,7 @@ Dual-mode operation:
 │   ├── latestVersion/     # OTA deployment files
 │   ├── SP2_V*.zip        # Version archives
 │   └── *_ChangeList.md   # Version change documentation
+├── mqtt-events-spec.md    # MQTT events 封包定義
 ├── push-check-list.md     # Pre-commit checklist
 └── README.md             # Version history and todo list
 ```

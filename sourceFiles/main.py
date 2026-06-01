@@ -10,13 +10,13 @@ import machine
 from lcd_manager import LCDManager
 from wifimgr import WiFiManager
 
-# GPIO配置:卡機端的TV-1配置，關掉卡機電源和刷卡功能
+# GPIO配置:卡機TV-1和掃碼器端的配置，開機時先關閉 EPAY_EN/PAYINOUT_EN/UART_EN（三者皆0才切斷電源）
 GPO_CardReader_EPAY_EN = machine.Pin(2, machine.Pin.OUT)
-GPO_CardReader_EPAY_EN.value(0)
+GPO_CardReader_EPAY_EN.value(0)   # 告訴卡機TV-1關閉刷卡功能
 GPO_CardReader_PAYINOUT_EN = machine.Pin(19, machine.Pin.OUT)
-GPO_CardReader_PAYINOUT_EN.value(0)
-GPO_CardReader_I2C_EN = machine.Pin(21, machine.Pin.OUT)
-GPO_CardReader_I2C_EN.value(0)
+GPO_CardReader_PAYINOUT_EN.value(0)  # 關閉卡機訊號開關
+GPO_QRScanner_UART_EN = machine.Pin(21, machine.Pin.OUT)
+GPO_QRScanner_UART_EN.value(0)    # 關閉掃碼器訊號開關(走UART)
 
 # GPIO配置:娃娃機端的投幣器電源配置，關掉投幣器電源
 GPO_Claw_Coin_EN = machine.Pin(5, machine.Pin.OUT)
@@ -282,10 +282,19 @@ while True:
     # import micropython
     gc.collect()
     print(gc.mem_free())
-    # micropython.mem_info()
+    # micropython.mem_info()     
     try:
-        print("執行analogCoinPay_Main.py...")
+        print("執行 analogCoinPay_Main.py ...")
         execfile('analogCoinPay_Main.py')
-    except Exception as e:
-        print("執行失敗:", e)
-        utime.sleep(5)
+    except:
+        try:
+            print("執行失敗，改跑 analogCoinPay_Main.mpy ...")
+            # import sys
+            # sys.modules.pop('analogCoinPay_Main', None)  # 清快取，強制重新執行
+            # gc.collect()                                   # 整理碎片
+            __import__('analogCoinPay_Main')
+        except Exception as e:
+            print("執行失敗:", e)
+            utime.sleep(5)
+
+
