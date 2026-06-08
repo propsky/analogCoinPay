@@ -1,4 +1,4 @@
-VERSION = "SP2_mpy_QR_test0415f"
+VERSION = "SP2_mpy_QR_V0.10a"
 
 import machine
 import binascii
@@ -356,6 +356,53 @@ server_event_QRScan_flag = 0
 server_event_QRScan_uuid = ""
 server_event_GiftOut_Count = 0
 
+def parse_wifi_qr(qr_text):
+    """
+    解析 WiFi QR Code 文字（格式：WIFI:T:<auth>;S:<ssid>;P:<password>;H:<hidden>;;）
+    條件：WPA 加密且有密碼，才寫入 wifi.dat（格式：ssid;password）
+    """
+    qr_text = qr_text.strip()
+
+    if not qr_text.upper().startswith("WIFI:"):  # 防衛性檢查，呼叫端通常已過濾，此處保險用
+        print("非 WiFi QR Code 格式")
+        return False
+
+    fields = {}
+    body = qr_text[5:]          # 去掉開頭 "WIFI:" 5字元，取後段內容
+    if body.endswith(";;"):
+        body = body[:-2]        # 去掉標準結尾 ";;"
+
+    for segment in body.split(";"):     # 以 ";" 切割成各欄位
+        if ":" in segment:
+            key, _, value = segment.partition(":")  # 取第一個 ":" 前為 key，後為 value
+            fields[key.upper()] = value             # key 轉大寫，相容不同大小寫的產生器
+
+    auth_type = fields.get("T", "").upper()  # 加密類型，如 WPA、WEP、nopass
+    ssid      = fields.get("S", "")          # WiFi SSID
+    password  = fields.get("P", "")
+
+    if auth_type != "WPA":
+        print("非 WPA 加密（T={}），略過".format(auth_type))
+        return False
+
+    if not password:
+        print("無密碼，略過")
+        return False
+
+    if not ssid:
+        print("SSID 為空，略過")
+        return False
+
+    try:
+        wifi_dat_str = "{};{}\n".format(ssid, password)
+        with open("wifi.dat", "w") as f:
+            f.write(wifi_dat_str)
+        print("已寫入 wifi.dat：{}".format(wifi_dat_str))
+        return True
+    except Exception as e:
+        print("寫入失敗：{}".format(e))
+        return False
+
 def uart_QRScanner_recive_packet_task():    # 讀取並處理掃碼器資料的執行緒
     print("二維掃碼器接收執行緒已啟動")
     while True:
@@ -366,8 +413,11 @@ def uart_QRScanner_recive_packet_task():    # 讀取並處理掃碼器資料的�
                     # 解碼成字串
                     qr_string = receive_data.decode('utf-8').strip()
                     print(f"Receive string from QRScanner: \"{qr_string}\"")
-                    len_qr_string = len(qr_string)
-                    if len_qr_string == 36:
+                    if qr_string.upper().startswith("WIFI:"):
+                        if parse_wifi_qr(qr_string):
+                            print("wifi.dat輸出完成")
+                            safe_reboot()
+                    elif len(qr_string) == 36:
                         global server_event_QRScan_flag, server_event_QRScan_uuid
                         if Fault_Detect_last_value != 0:  # 故障或未知狀態，不處理
                             print(f"娃娃機故障或狀態未知，忽略QR掃碼器的UUID")
@@ -376,7 +426,7 @@ def uart_QRScanner_recive_packet_task():    # 讀取並處理掃碼器資料的�
                             server_event_QRScan_flag = 1
                             print(f"QR掃碼器成功掃到 UUID，即將發送到 MQTT Broker")
                     else:
-                        print(f"QR Code的長度不對: {len_qr_string}")
+                        print(f"QR Code格式不符（非WiFi、非36字元UUID）: {len(qr_string)}字元")
         except Exception as e:
             print(f"QRScanner執行緒例外: {e}")
         utime.sleep_ms(100)  # 休眠一小段時間，避免過度使用CPU資源
@@ -661,7 +711,7 @@ def GPIO_Setting_Coin_and_CardReader(Is_Fault):
         GPO_CardReader_EPAY_EN.value(1)
         GPO_Claw_Coin_EN.value(1)
         if (analog_claw_1.Error_Code_of_Machine%100) == 24:
-            analog_claw_1.Error_Code_of_Machine = (analog_claw_1.Error_Code_of_Machine-24)/100
+            analog_claw_1.Error_Code_of_Machine = (analog_claw_1.Error_Code_of_Machine-24)//100
     LCD_update_flag['Claw_State'] = True
 
 def safe_reboot():

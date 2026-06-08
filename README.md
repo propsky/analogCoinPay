@@ -1,5 +1,20 @@
 # code-change list
 
+**2026/6/2_SP2_mpy_QR_V0.10a, Thomas**
+1. analogCoinPay_Main.py 新增 WiFi QR Code 寫入功能  
+a. 新增 `parse_wifi_qr()` 函式：解析 WiFi QR Code 格式（`WIFI:T:<auth>;S:<ssid>;P:<password>;H:<hidden>;;`），驗證為 WPA 加密且 SSID/密碼不為空後，寫入 wifi.dat（格式：`ssid;password\n`），與 wifimgr.py 的 `save_wifi_config()` 格式一致  
+b. 修改 `uart_QRScanner_recive_packet_task()`：掃到 WIFI: 開頭時優先呼叫 `parse_wifi_qr()`，成功後執行 `safe_reboot()`；非 WiFi 格式才進入 UUID 36 字元判斷  
+c. WiFi QR Code 前綴判斷改為大小寫不敏感（`.upper().startswith("WIFI:")`），相容不同 QR 產生器輸出  
+d. 娃娃機故障時仍可接受 WiFi QR Code 寫入（故障檢查只擋 UUID MQTT 發送，不擋 WiFi 設定）  
+2. analogCoinPay_Main.py 修正整數除法錯誤  
+a. `Error_Code_of_Machine` 計算從 `/`（浮點）改為 `//`（整數），避免後續 `%100`、`*100` 運算型別不一致  
+3. main.py 補上缺少的模組導入，並修正 OTA branch 設定  
+a. 新增 `import gc`，修正開機時 `gc.collect()` / `gc.mem_free()` 可能因未導入而失敗的問題  
+b. OTA branch 從 `"SP2_HWv1"` 改為 `"SP2_HWv1_QR_mpy"`，確保 OTA 從正確的 branch 拉取最新檔案  
+4. 修改 to-be-do list  
+a. 新增第 8 項：wifimgr.py 跨年日期計算潛在 bug（AI 檢查發現，低優先）  
+* Based on SP2_HWv1_QR_mpy 2026/4/15_SP2_mpy_QR_test0415f, Thomas
+---
 **2026/4/15_SP2_mpy_QR_test0415f, Thomas**
 1. analogCoinPay_Main.py 新增 QR Code 掃碼器支援  
 a. Pin 21 從 `GPO_CardReader_I2C_EN` 更名為 `GPO_QRScanner_UART_EN`，功能改為 QR 掃碼器 UART 訊號開關，初始值從 0 改為 1（開通）  
@@ -108,6 +123,12 @@ e. 加速Rounds_of_Starting_games的反應速度
 
 7. 新增 mqtt-events-spec.md，目前僅涵蓋 events 類封包（qrscan、GiftOut）
 未來目標：擴充為完整的 MQTT 封包定義文件，涵蓋所有收（subscribe）和發（publish）的封包格式
+
+8. wifimgr.py get_http_time() 跨年日期計算潛在 bug（AI 檢查發現，低優先）
+wifimgr.py 第 249 行，當 12/31 跨年時，month 被賦值為元組 (1, year+1) 而非整數，year 也未更新。
+此路徑為 NTP 全部失敗時的備援，且只在 12/31 觸發。
+目前多台機器在客人現場長期運行皆正常，暫不修正。
+待日後確認後修正：`day, month = 1, (month + 1) if month < 12 else (1, year + 1)` 應改為 else 分支加上 `day, month, year = 1, 1, year + 1`。
 
 9. 大陸扭蛋機投幣器相容性問題（持續觀察）
 投10元打一次 pulse，投50元打5次 pulse。

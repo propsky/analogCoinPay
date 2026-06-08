@@ -8,9 +8,9 @@ ESP32 Smart Pay Board 2024 - MicroPython-based payment system for claw machines 
 
 **Hardware**: ESP32 microcontroller  
 **Language**: MicroPython  
-**Current Version**: SP2_QR branch (based on SP2_V0.30b)  
+**Current Version**: SP2_mpy_QR_V0.10a  
 **Main Branch**: main  
-**Development Branch**: SP2_HWv1  
+**Development Branch**: SP2_HWv1_QR_mpy  
 **MicroPython Firmware**: v1.18-9-gd8e35d0e0-dirty (2022-02-19)
 
 ## Architecture
@@ -160,28 +160,18 @@ Dual-mode operation:
 └── README.md             # Version history and todo list
 ```
 
-## Recent Improvements (SP2_V0.30b)
+## Recent Improvements (SP2_mpy_QR_V0.10a)
 
-### Code Quality Enhancements
-- **Syntax Fixes**: Resolved global variable declaration issues in interrupt handlers
-- **Module Standardization**: Unified import statements to use `uos` instead of `os` for MicroPython compatibility
-- **Safe Reboot Function**: Added `safe_reboot()` for graceful system shutdown with hardware power control
+### WiFi QR Code Setup
+- **parse_wifi_qr()**: Parses `WIFI:T:<auth>;S:<ssid>;P:<password>;H:<hidden>;;` format, validates WPA + non-empty SSID/password, writes `ssid;password\n` to wifi.dat, then calls `safe_reboot()`
+- **Priority logic**: `uart_QRScanner_recive_packet_task()` checks `WIFI:` prefix first; UUID 36-char check only if not WiFi QR
+- **Case-insensitive**: Uses `.upper().startswith("WIFI:")` to handle any-case QR generators
+- **Fault guard bypass**: WiFi QR writing is allowed even when claw machine is in fault state (fault guard only blocks UUID MQTT)
 
-### Configuration System
-- **Dynamic Boot Delay**: Configurable startup delay via `config.json` (`boot_delay_sec` parameter)
-- **Development Mode**: Reduced startup time from 60s to 1s for faster development cycles
-- **Production Mode**: Maintains 60s delay for 4G router compatibility
-
-### Performance Optimizations
-- **Memory Management**: Improved garbage collection and resource cleanup
-- **Interrupt Handling**: Enhanced debouncing and pulse detection algorithms
-- **State Management**: Refined fault detection with -1 initial state for better error handling
-
-### PAYOUT Detection Changes
-**Important**: PAYOUT pulse detection window has been modified:
-- **Previous**: 50-200ms Low pulse detection
-- **Current**: 5-300ms Low pulse detection (reverted for compatibility)
-- This change improves hardware compatibility but may affect detection sensitivity
+### Bug Fixes
+- **Integer division**: `Error_Code_of_Machine` calculation changed from `/` (float) to `//` (integer) to keep type consistent with `%100` and `*100` operations
+- **Missing import**: Added `import gc` to main.py; `gc.collect()` / `gc.mem_free()` were called before any import
+- **OTA branch**: main.py OTA branch corrected from `"SP2_HWv1"` to `"SP2_HWv1_QR_mpy"`
 
 ## Hardware Dependencies
 

@@ -4,6 +4,7 @@
 2. 更新analogCoinPay_Main.py第一行的版本號
 3. 檢查sourceFiles內的檔案和程式碼與上一版的差異，判斷是否合理
 4. 讓外面小卡可以OTA更新到最新程式碼：將sourceFiles檔案複製到releaseFiles\latestVersion
+   注意：config.json 不從 sourceFiles 複製，latestVersion 內暫時保留固定內容 {"boot_delay_sec": 3}
 5. 檢查releaseFiles\latestVersion內的檔案和程式碼與上一版的差異，判斷是否合理
 6. latestVersion資料夾壓縮成SP2_Vxxxxx.zip，保存備份放進releaseFiles資料夾，可以參考以前的SP2_V0.0610sd.zip
 7. 修改README.md的code-change list，參考之前的格式，新增這次新版的修改內容：
@@ -15,8 +16,9 @@
     3. 修改項目3
     * Based on 案子版本 年/月/日_硬體架構版本_韌體版本, 發布人
     ---
-8. 第7點除了Base on那行以外，第一行日期版本+內容都複製填入commit，然後即可以下push
-9. 打開Github網站的這個案子，判斷這次的commit變動內容是否合理
+8. 更新claude.md
+9. 第7點除了Base on那行以外，第一行日期版本+內容都複製填入commit，然後即可以下push
+10. 打開Github網站的這個案子，判斷這次的commit變動內容是否合理
 
 
 
