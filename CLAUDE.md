@@ -6,11 +6,13 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ESP32 Smart Pay Board 2024 - MicroPython-based payment system for claw machines with coin detection, card reader integration, and WiFi management.
 
+本 branch 服務智付小卡 v2.1 硬體（co-layout 板上件 RGB LED，無 LCD）。
+
 **Hardware**: ESP32 microcontroller  
 **Language**: MicroPython  
-**Current Version**: SP2_V0.30b  
-**Main Branch**: main  
-**Development Branch**: SP2_HWv1
+**Current Version**: SP3_V0.01a  
+**Main Branch**: main（僅存放版本與 branch 索引，不含程式碼）  
+**Development Branch**: SP3_HWv2.1
 
 ## Architecture
 
@@ -59,7 +61,7 @@ Key hardware interfaces defined in main.py:
 # 3. Deploy to OTA release directory
 cp sourceFiles/* releaseFiles/latestVersion/
 # 4. Create versioned backup
-cd releaseFiles && zip -r SP2_V[version].zip latestVersion/
+cd releaseFiles && zip -r SP3_V[version].zip latestVersion/
 ```
 
 ### Push Checklist (from push-check-list.md)
@@ -132,28 +134,9 @@ Dual-mode operation:
 └── README.md             # Version history and todo list
 ```
 
-## Recent Improvements (SP2_V0.30b)
+## Recent Changes (SP3_V0.01a)
 
-### Code Quality Enhancements
-- **Syntax Fixes**: Resolved global variable declaration issues in interrupt handlers
-- **Module Standardization**: Unified import statements to use `uos` instead of `os` for MicroPython compatibility
-- **Safe Reboot Function**: Added `safe_reboot()` for graceful system shutdown with hardware power control
-
-### Configuration System
-- **Dynamic Boot Delay**: Configurable startup delay via `config.json` (`boot_delay_sec` parameter)
-- **Development Mode**: Reduced startup time from 60s to 1s for faster development cycles
-- **Production Mode**: Maintains 60s delay for 4G router compatibility
-
-### Performance Optimizations
-- **Memory Management**: Improved garbage collection and resource cleanup
-- **Interrupt Handling**: Enhanced debouncing and pulse detection algorithms
-- **State Management**: Refined fault detection with -1 initial state for better error handling
-
-### PAYOUT Detection Changes
-**Important**: PAYOUT pulse detection window has been modified:
-- **Previous**: 50-200ms Low pulse detection
-- **Current**: 5-300ms Low pulse detection (reverted for compatibility)
-- This change improves hardware compatibility but may affect detection sensitivity
+自 SP2_HWv1 的 SP2_V0.30b 拷貝而來，建立 SP3 產品線。本版尚未實作 RGB LED，功能與 SP2_V0.30b 完全相同。RGB LED (WS2812) 為後續獨立工作，屆時再一併更新本文件中與硬體相關的描述（GPIO Configuration、Core Components、Hardware Dependencies、File Structure）。
 
 ## Hardware Dependencies
 

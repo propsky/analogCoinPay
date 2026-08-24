@@ -245,7 +245,7 @@ if network_info:
             OTA = senko.Senko(
                 user="propsky",  # Required
                 repo="analogCoinPay",  # Required
-                branch="SP2_HWv1",  # Optional: Defaults to "master"
+                branch="SP3_HWv2.1",  # Optional: Defaults to "master"
                 working_dir="releaseFiles/latestVersion",  # Optional: Defaults to "app"
                 files=file_list
             )
