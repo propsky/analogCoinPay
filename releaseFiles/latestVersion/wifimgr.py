@@ -13,7 +13,8 @@ class WiFiManager:
         self.wifi.active(True)
 
         unique_id_hex = binascii.hexlify(machine.unique_id()[-3:]).decode().upper()
-        self.DHCP_NAME = "SmartPay_" + unique_id_hex        
+        self.DHCP_NAME = "SmartPay_" + unique_id_hex
+        self._has_hostname_api = hasattr(network, 'hostname')   # 是否為新韌體(v1.20+)（有 network.hostname）
 
         self.ap_ssid, self.ap_password = self.generate_ap_credentials()
 
@@ -59,14 +60,27 @@ class WiFiManager:
             utime.sleep(1)
         self.wifi.active(True)
 
-    def connect(self, timeout=60, retry_interval=3):
-        """嘗試連線 Wi-Fi，失敗時=>
-        => 增加 Timeout 機制
-        => 自動偵測 Wi-Fi 連線狀態
-        => 才啟動 AP 設定模式"""
+    def _set_hostname(self):
+        # 主機名要在連線前設好，兩韌體 API 與時機相反：
+        #   新韌體(v1.20+): network.hostname()，需在 active(True) 之「前」設（v1.29 實測）
+        #   舊韌體(1.18.9): wifi.config(dhcp_hostname=)，需在 active(True) 之「後」設（1.18.9 實測）
+        if self._has_hostname_api:
+            self.wifi.active(False)
+            utime.sleep(1)                       # 與實測流程一致
+            network.hostname(self.DHCP_NAME)
+            self.wifi.active(True)
+            print("主機名[新韌體 network.hostname]:", network.hostname())
+        else:
+            self.wifi.config(dhcp_hostname=self.DHCP_NAME)
+            print("主機名[舊韌體 dhcp_hostname]:", self.wifi.config('dhcp_hostname'))
+
+    def connect(self, timeout=60, retry_interval=3, on_tick=None, on_ap_mode=None):
+        """連線 Wi-Fi，失敗才啟動 AP 設定模式。on_tick/on_ap_mode 回呼見 rgb-led-spec.md。"""
 
         #wifi.dat是空的時候的情況
         if not self.ssid or not self.password:
+            if on_ap_mode:
+                on_ap_mode()       # 通知外部「即將進入 AP 設定模式」，wifimgr 不需知道那對應什麼燈
             print("Wi-Fi 設定檔讀取失敗，啟動 AP 設定模式...")
             self.start_ap_web()
             return None
@@ -77,7 +91,7 @@ class WiFiManager:
 
         print(f"嘗試連線 Wi-Fi {self.ssid} ...")
         self.disconnect()
-        self.wifi.config(dhcp_hostname=self.DHCP_NAME)
+        self._set_hostname()                 # 連線前一刻設主機名（放在 wifi.connect 之前）
         self.wifi.connect(self.ssid, self.password)
         
         # 嘗試10次
@@ -86,7 +100,12 @@ class WiFiManager:
                 print("Wi-Fi 連線成功！")
                 return self.get_ip_mac()
             print(f"嘗試連線中... {retry+1}/10")
-            utime.sleep(2)
+            # 原本 utime.sleep(2)：改成 50ms 分段，讓外部（LED）能在等待期間推進動畫。
+            # on_tick=None 時行為與原本相同（僅把 2 秒切成 40 段 sleep）。
+            for _ in range(40):        # 40 × 50ms = 2 秒
+                if on_tick:
+                    on_tick()
+                utime.sleep_ms(50)
 
         # print("Wi-Fi 嘗試連線10次失敗！啟動 AP 設定模式")
         # self.start_ap_web()

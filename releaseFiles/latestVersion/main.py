@@ -1,13 +1,14 @@
 import utime
 import uos
 import ujson
-from machine import SPI, Pin, WDT
+import gc
+from machine import Pin, WDT
 import network
 import ntptime
 from BN165DKBDriver import readKBData
 import machine
-#　lcd 模組
-from lcd_manager import LCDManager
+# RGB LED 狀態燈模組（SP3 移除 LCD 後改用）
+from rgb_led_manager import RGBLEDManager
 from wifimgr import WiFiManager
 
 # GPIO配置:卡機端的TV-1配置，關掉卡機電源和刷卡功能
@@ -29,21 +30,13 @@ PL = Pin(32, Pin.OUT)
 Q7 = Pin(33, Pin.IN)
 ESP32_TXD2_FEILOLI = Pin(17, Pin.IN)
 
-# GPIO配置:LCD的背光配置和啟動背光
-LCD_EN = machine.Pin(27, machine.Pin.OUT)
-LCD_EN.value(1)
+# GPIO27 原為 LCD_EN 背光致能；SP3 移除 LCD 後，此腳改給 WS2812 狀態燈（見 rgb_led_manager）
 
-# 把st7735所有相關的模組都寫在lcd_manager
-# 獲取 LCD 單例singleton
-lcd_mgr = LCDManager.get_instance() 
-# LCD單例初始化
-lcd_mgr.initialize()
-lcd_mgr.fill()  # 使用預設顏色（黑色）
-# 繪製文字
-lcd_mgr.draw_text(0, 0, fg=lcd_mgr.color.WHITE, bg=lcd_mgr.color.BLUE, bgmode=-1) 
-#bgmode預設是0 ==>使用預設的bgcolor 例如:.fill()所指定的
-#bgmode預設是-1 ==>使用當前參數所指定的bgcolor bg=lcd_mgr.color.BLUE
-lcd_mgr.show()
+# 取得 RGB LED 單例並初始化：先跑上電自檢(紅→綠→藍)，再進入開機中(白呼吸)
+led_mgr = RGBLEDManager.get_instance()
+led_mgr.initialize()        # 預設 pin=27, num=1, brightness=25
+led_mgr.boot_test()         # 紅→綠→藍 各 500ms，阻塞 1500ms
+led_mgr.set_state(RGBLEDManager.BOOTING)
 
 gc.collect()
 print(gc.mem_free())
@@ -53,8 +46,7 @@ def UDP_Load_Wifi():
         import usocket as socket
     except:
         import socket
-    lcd_mgr.draw_text(0, 16,text='wait UDP Wi-Fi.', fg=lcd_mgr.color.WHITE, bg=lcd_mgr.color.BLACK, bgmode=-1) 
-    lcd_mgr.show()
+    led_mgr.set_state(RGBLEDManager.WIFI_CONFIG)   # UDP 設定模式：水藍呼吸
     # Connect to Wi-Fi
     wifi_ssid = "Sam"
     wifi_password = "0928666624"
@@ -64,28 +56,21 @@ def UDP_Load_Wifi():
     station.connect(wifi_ssid, wifi_password)
 
     while not station.isconnected():
-        utime.sleep_ms(200)
+        led_mgr.tick()             # 等待連線期間推進燈效，否則呼吸會凍住
+        utime.sleep_ms(50)
 
     print("Connected to Wi-Fi")
     print('\nConnected. Network config: ', station.ifconfig())
-    lcd_mgr.draw_text(0, 32, text='UDP Wi-Fi OK')
-    lcd_mgr.draw_text(0, 48, text='IP:') 
-    lcd_mgr.draw_text(3, 64, text=station.ifconfig()[0]) 
-    lcd_mgr.show()
 
     # Set up UDP socket
     udp_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     udp_socket.bind(("0.0.0.0", 1234))
 
     print("Listening for UDP messages on port 1234")
-    lcd_mgr.draw_text(0, 80, text='wait UDP...')
-    lcd_mgr.show()
 
     while True:
         data, addr = udp_socket.recvfrom(1024)
         print("Received message: {}".format(data.decode('utf-8')))
-        lcd_mgr.draw_text(0, 96,text=data.decode('utf-8'))
-        lcd_mgr.show()
         with open('wifi.dat', "w") as f:
             f.write(data.decode('utf-8'))
         utime.sleep(3)
@@ -95,9 +80,12 @@ def UDP_Load_Wifi():
 Data_74HC165 = readKBData(1, CP, CE, PL, Q7)
 print("74HC165:", Data_74HC165)
 if Data_74HC165[3] == 0 :
-    print("SW1被按下，結束程式")
-    import sys
-    sys.exit()
+    print("SW1被按下，停止程式並進入 REPL（可推檔/下指令）")
+    led_mgr.set_state(RGBLEDManager.STOPPED)   # SW1 停止：紅恆亮（此處在 WDT 建立之前，無看門狗）
+    gc.collect()                               # 回收 setup 暫時物件，進 REPL 後多點可用 RAM
+    # 丟一般例外(KeyboardInterrupt)中止 main.py → 掉 REPL 等待畫面。
+    # 註：1.29 的 sys.exit()/SystemExit 會被當 forced-exit 觸發 soft reset → 重開迴圈，故不用它。
+    raise KeyboardInterrupt
 elif Data_74HC165[0] == 0 :
     from mach_meter import MachMeter
     print("正在初始化 MachMeter，並且歸零。")
@@ -149,30 +137,35 @@ def read_boot_delay():
 
 # 讀取開機延遲設定
 delay_seconds = read_boot_delay()
-# 執行延遲
+# 執行延遲：改成 50ms 分段並推進燈效，期間維持 BOOTING(白呼吸)；否則呼吸會凍在第一幀
 print(f'開始延遲 {delay_seconds} 秒...')
-utime.sleep(delay_seconds)
+for _ in range(delay_seconds * 20):   # delay_seconds × 20 段 × 50ms
+    led_mgr.tick()
+    utime.sleep_ms(50)
 print('延遲完成！')
 
 # =============================
 # wifi連線
 # =============================
 wifi_manager = WiFiManager()
-network_info = wifi_manager.connect()
+# 先無條件設「嘗試連線」(WIFI_CONNECTING 紅呼吸)；若 wifimgr 判定要進 AP 設定模式，
+# 會透過 on_ap_mode 回呼把燈改成 WIFI_CONFIG(水藍呼吸)。連線分支判斷只留在 wifimgr 一處。
+led_mgr.set_state(RGBLEDManager.WIFI_CONNECTING)
+network_info = wifi_manager.connect(
+    on_tick=led_mgr.tick,                                            # 等待期間推進燈效
+    on_ap_mode=lambda: led_mgr.set_state(RGBLEDManager.WIFI_CONFIG),  # 進 AP 設定模式時轉水藍呼吸
+)
 #print(f"網路WiFi:{network_info}")
 
-if network_info: #會顯示net work config資料
+if network_info: #連上 WiFi：接著要等 MQTT，先顯示 NO_MQTT(黃閃2下)
     signal_strength = wifi_manager.get_signal_strength()
     print("WiFi Signal Strength:", signal_strength, "dBm")
-    lcd_mgr.draw_text(0 , 16, text='SSID:')
-    lcd_mgr.draw_text(5 * 8 , 16, text=wifi_manager.ssid)
-    lcd_mgr.draw_text(0 , 16 * 2, text=network_info['ip'])
-    lcd_mgr.show()
+    led_mgr.set_state(RGBLEDManager.NO_MQTT)
 
 else:
     wifi_manager.disconnect()
-    print("No Wifi") 
-    lcd_mgr.draw_text(0 , 16, text='No Wifi')
+    print("No Wifi")
+    led_mgr.set_state(RGBLEDManager.NO_WIFI)          # 重試 10 次皆失敗：紅閃1下(確定連不上)
 
 print("ESP Wi-Fi OK")
 gc.collect()
@@ -231,8 +224,7 @@ if network_info:
     if filename in file_list:
         # 在這邊要做讀取OTA列表，然後進行OTA的執行
         print("OTA檔案存在, OTA checking files...")
-        lcd_mgr.draw_text(0 , 16 * 3, text="OTAing...")
-        lcd_mgr.show()
+        led_mgr.set_state(RGBLEDManager.UPDATING_REBOOTING, lock=True)   # OTA 進行中：白恆亮
         try:
             with open(filename) as f:
                 lines = f.readlines()[0].strip()
@@ -245,7 +237,7 @@ if network_info:
             OTA = senko.Senko(
                 user="propsky",  # Required
                 repo="analogCoinPay",  # Required
-                branch="SP2_HWv1",  # Optional: Defaults to "master"
+                branch="SP3_HWv2.1",  # Optional: Defaults to "master"
                 working_dir="releaseFiles/latestVersion",  # Optional: Defaults to "app"
                 files=file_list
             )
@@ -263,8 +255,6 @@ if network_info:
         uos.remove(filename)
         machine.reset()
     else:
-        lcd_mgr.draw_text(0, 16 * 3 ,text="No OTA")
-        lcd_mgr.show()
         print("OTA檔案不存在")
 
     print("ESP OTA OK")
@@ -274,10 +264,12 @@ else:
 # 運行主程式
 # =============================
 while True:
+    # 倒數 3 秒進主程式：維持前一狀態的燈號，用 50ms 分段推進燈效
     for i in range(3, 0, -1):
-        lcd_mgr.draw_text(0, 16 * 3, text=f"CountDown...{str(i)}",bg=lcd_mgr.color.BLACK, bgmode=-1)
-        lcd_mgr.show()
-        utime.sleep(1)
+        print(f"CountDown...{i}")
+        for _ in range(20):        # 20 × 50ms = 1 秒
+            led_mgr.tick()
+            utime.sleep_ms(50)
 
     # import micropython
     gc.collect()

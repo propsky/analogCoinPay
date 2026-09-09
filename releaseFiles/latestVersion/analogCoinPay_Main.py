@@ -1,4 +1,4 @@
-VERSION = "SP2_V0.30b"
+VERSION = "SP3_V0.01f"
 
 import machine
 import binascii
@@ -11,6 +11,7 @@ import gc
 from machine import WDT
 import uos
 from mach_meter import MachMeter
+from rgb_led_manager import RGBLEDManager
 
 # 定義狀態類型
 class MainStatus:
@@ -18,7 +19,7 @@ class MainStatus:
     NONE_INTERNET = 1   # 連上WiFi，但還沒連上外網      現在先不做這個判斷
     NONE_MQTT = 2       # 連上外網，但還沒連上MQTT Broker
     STANDBY_MQTT = 7    # 連上MQTT，正常運行中
-    GOING_TO_OTA = 6    # 接收到要OTA，但還沒完成OTA
+    GOING_TO_OTA = 6    # 接收到要OTA，但還沒完成OTA（目前未使用：沒有任何地方進入此狀態，程式碼還沒複雜到需要它，保留備用）
     UNEXPECTED_STATE = -1
 
 # 定義狀態機類別
@@ -27,36 +28,31 @@ class MainStateMachine:
         self.state = MainStatus.NONE_WIFI
         # 以下執行"狀態機初始化"相應的操作
         print('\n\rInit, MainStatus: NONE_WIFI')
-        global main_while_delay_seconds, LCD_update_flag
+        global main_while_delay_seconds
         main_while_delay_seconds = 1
-        LCD_update_flag['Uniform'] = True
 
     def transition(self, action):
-        global main_while_delay_seconds, LCD_update_flag
+        global main_while_delay_seconds
         if action == 'WiFi is disconnect':
             self.state = MainStatus.NONE_WIFI
             # 以下執行"未連上WiFi後"相應的操作
             print('\n\rAction: WiFi is disconnect, MainStatus: NONE_WIFI')
             main_while_delay_seconds = 1
-            LCD_update_flag['WiFi'] = True
         elif self.state == MainStatus.NONE_WIFI and action == 'WiFi is OK':
             self.state = MainStatus.NONE_INTERNET
             # 以下執行"連上WiFi後"相應的操作
             print('\n\rAction: WiFi is OK, MainStatus: NONE_INTERNET')
             main_while_delay_seconds = 1
-            LCD_update_flag['WiFi'] = True
         elif self.state == MainStatus.NONE_INTERNET and action == 'Internet is OK':
             self.state = MainStatus.NONE_MQTT
             # 以下執行"連上Internet後"相應的操作
             print('\n\rAction: Internet is OK, MainStatus: NONE_MQTT')
             main_while_delay_seconds = 1
-            LCD_update_flag['WiFi'] = True
         elif self.state == MainStatus.NONE_MQTT and action == 'MQTT is OK':
             self.state = MainStatus.STANDBY_MQTT
             # 以下執行"連上MQTT後"相應的操作
             print('\n\rAction: MQTT is OK, MainStatus: STANDBY_MQTT')
             main_while_delay_seconds = 10
-            LCD_update_flag['WiFi'] = True
 
             ''' # 這作法不順利，先不用
             elif action == 'MQTT is disconnect':
@@ -66,7 +62,6 @@ class MainStateMachine:
                 mq_client_1.disconnect()
                 now_main_state.transition('WiFi is disconnect')
                 main_while_delay_seconds = 1
-                LCD_update_flag['WiFi'] = True
             '''
 
         else:
@@ -193,7 +188,6 @@ def subscribe_MQTT_claw_recive_callback(topic, message):
                         analog_claw_1.Number_of_Free_Payment     = meter.inc_fplay()
                         freeplays = freeplays - 1
                     meter.save()
-                    LCD_update_flag['Claw_Value'] = True
             elif data['commands'] == 'fileinfo':
                 publish_MQTT_claw_data(analog_claw_1, 'commandack-fileinfo',data['filename'])
                 pass
@@ -348,19 +342,21 @@ class analogClawData:
         self.Number_of_Award = 0                # for 禮品出獎次數
         self.Error_Code_of_Machine = 99         # for 機台故障代碼表
  
-# 定義virtual timer 軟體計時器回調函式 (每0.2秒執行1次)
+# 週期性工作迴圈（每 50ms 一次）：LED 每次推進；其餘 0.2 秒工作用計數器 %4 分頻維持原頻率
 def three_timer_task():
+    _tick_div = 0
     while True:
         try:
-            claw_check_timer_callback()
-            if Rounds_of_Starting_games > 0:
-                GPIO_Send_Starting_games()
-            LCD_update_timer_callback()
-            server_check_timer_callback()
-
+            LED_update_callback()                   # 每 50ms：依狀態設燈+推進動畫（4Hz 快閃需 <=50ms 時基）
+            _tick_div = (_tick_div + 1) % 4
+            if _tick_div == 0:                      # 每 4 次 = 200ms，維持原本 0.2 秒工作的頻率
+                claw_check_timer_callback()
+                if Rounds_of_Starting_games > 0:
+                    GPIO_Send_Starting_games()
+                server_check_timer_callback()
         except OSError as e:
             print("3t error:", e)
-        utime.sleep_ms(200)                         # 休眠一小段時間，避免過度使用CPU資源
+        utime.sleep_ms(50)                          # 休眠一小段時間，避免過度使用CPU資源
 
 Fault_Detect_last_value = -1   # -1 代表未知狀態
 # 定義claw_check計時器回調函式
@@ -373,51 +369,18 @@ def claw_check_timer_callback():
         GPIO_Setting_Coin_and_CardReader(Fault_Detect_value)
         Fault_Detect_last_value = Fault_Detect_value
 
-# 定義LCD_update計時器回調函式
-def LCD_update_timer_callback():
-    if LCD_update_flag['Uniform']:
-        LCD_update_flag['Uniform'] = False
-        unique_id_hex = binascii.hexlify(machine.unique_id()).decode().upper()
-        lcd_mgr.fill()  # 使用預設顏色（黑色）
-        lcd_mgr.draw_text(0, 0, fg=lcd_mgr.color.WHITE, bg=lcd_mgr.color.BLUE, bgmode=-1)
-        lcd_mgr.draw_text(5, 8 * 16 + 5, text=unique_id_hex, fg=lcd_mgr.color.RED, bg=lcd_mgr.color.WHITE, bgmode=-1, scale=1.3) 
-        lcd_mgr.show()
-        lcd_mgr.draw_text(0, 1 * 16, text='IN:--------') 
-        lcd_mgr.draw_text(0, 2 * 16, text='OUT:--------') 
-        lcd_mgr.draw_text(0, 3 * 16, text='EP:--------') 
-        lcd_mgr.draw_text(0, 4 * 16, text='FP:--------') 
-        lcd_mgr.draw_text(0, 5 * 16, text='ST:--') 
-        lcd_mgr.draw_text(0, 6 * 16, text='Time:mm/dd hh:mm') 
-        lcd_mgr.draw_text(0, 7 * 16, text='Wifi:-----')
-        lcd_mgr.show()
-    elif LCD_update_flag['WiFi']: # 顯示wifi和MQTT狀態
-        LCD_update_flag['WiFi'] = False
-        if now_main_state.state == MainStatus.NONE_WIFI or now_main_state.state == MainStatus.NONE_INTERNET:
-            lcd_mgr.draw_text(5 * 8, 7 * 16, text='dis  ', bgmode=-1)
-        elif now_main_state.state == MainStatus.NONE_MQTT:
-            lcd_mgr.draw_text(5 * 8, 7 * 16, text='error', bgmode=-1)
-        elif now_main_state.state == MainStatus.STANDBY_MQTT:
-            lcd_mgr.draw_text(5 * 8, 7 * 16, text='ok   ', bgmode=-1)
-        lcd_mgr.show()
-    elif LCD_update_flag['Claw_State']: # 顯示娃娃機狀態
-        LCD_update_flag['Claw_State'] = False  
-        lcd_mgr.draw_text(3 * 8, 5 * 16, text=("%02d" % (analog_claw_1.Error_Code_of_Machine%100)), bgmode=-1)
-        lcd_mgr.show()
-    elif LCD_update_flag['Claw_Value']: # 顯示娃娃機數值
-        LCD_update_flag['Claw_Value'] = False
-        lcd_mgr.draw_text(3 * 8, 1 * 16, text=("%-8d" % analog_claw_1.Number_of_Coin), bgmode=-1)
-        lcd_mgr.draw_text(4 * 8, 2 * 16, text=("%-8d" % analog_claw_1.Number_of_Award), bgmode=-1)
-        lcd_mgr.draw_text(3 * 8, 3 * 16, text=("%-8d" % analog_claw_1.Number_of_Original_Payment), bgmode=-1)
-        lcd_mgr.draw_text(3 * 8, 4 * 16, text=("%-8d" % analog_claw_1.Number_of_Free_Payment), bgmode=-1)
-        lcd_mgr.show()
-    elif (LCD_update_flag['Time']): # 顯示時間
-        LCD_update_flag['Time'] = False  
-        timestamp = utime.time()
-        local_time = utime.localtime(timestamp) # 轉換為本地時間
-        # 格式化为 "mm/dd hh:mm" 格式的字符串
-        formatted_time = "%02d/%02d %02d:%02d" % local_time[1:5]
-        lcd_mgr.draw_text(5 * 8, 6 * 16, text=formatted_time, bgmode=-1)
-        lcd_mgr.show()
+# 依「狀態機狀態 + 故障碼」推導狀態燈（每 tick 直接推導，不用旗標；優先權順序不可更動）
+def LED_update_callback():
+    if now_main_state.state == MainStatus.NONE_WIFI:
+        target = RGBLEDManager.NO_WIFI            # 紅閃1下：沒網路（後台看不到這台，現場先修網路）
+    elif now_main_state.state != MainStatus.STANDBY_MQTT:
+        target = RGBLEDManager.NO_MQTT            # 黃閃2下：有網路但還沒連上 MQTT
+    elif analog_claw_1.Error_Code_of_Machine != 0:
+        target = RGBLEDManager.MACHINE_FAULT      # 紫閃3下：娃娃機故障
+    else:
+        target = RGBLEDManager.RUNNING            # 綠呼吸：正常運行
+    led_mgr.set_state(target)
+    led_mgr.tick()
 
 # 定義server_check計時器回調函式 (每0.2秒執行1次)
 def server_check_timer_callback():
@@ -491,7 +454,6 @@ def GPI_interrupt_handler(pin):
                     Rounds_of_Starting_games = Rounds_of_Starting_games + 1
                     analog_claw_1.Number_of_Original_Payment = meter.inc_epay()
                     meter.save()
-                    LCD_update_flag['Claw_Value'] = True
                 else :
                     print("Pulse的Hi或Lo寬度不正確，不進行任何動作")
                 PAYOUT_last_rising_time = PAYOUT_rising_time
@@ -515,7 +477,6 @@ def GPI_interrupt_handler(pin):
                     Rounds_of_Starting_games = Rounds_of_Starting_games + 1
                     analog_claw_1.Number_of_Coin  = meter.inc_in()
                     meter.save()
-                    LCD_update_flag['Claw_Value'] = True
                 else :
                     print("Pulse的Hi或Lo寬度不正確，不進行任何動作")
                 Coin_IN1_last_rising_time = Coin_IN1_rising_time
@@ -539,7 +500,6 @@ def GPI_interrupt_handler(pin):
                     Rounds_of_Starting_games = Rounds_of_Starting_games + 1
                     analog_claw_1.Number_of_Coin  = meter.inc_in()
                     meter.save()
-                    LCD_update_flag['Claw_Value'] = True
                 else :
                     print("Pulse的Hi或Lo寬度不正確，不進行任何動作")
                 Coin_IN2_last_rising_time = Coin_IN2_rising_time
@@ -570,7 +530,6 @@ def GPI_interrupt_handler(pin):
                     print("通用電眼Low Pulse->Hi Pulse，寬度都正確，出獎+1")
                     analog_claw_1.Number_of_Award = meter.inc_out()
                     meter.save()
-                    LCD_update_flag['Claw_Value'] = True
                 else :
                     print("通用電眼Low Pulse->Hi Pulse，寬度不正確，不進行任何動作")
             Eyes_IROUT_last_falling_time = Eyes_IROUT_falling_time
@@ -584,7 +543,6 @@ def GPI_interrupt_handler(pin):
                 print("出表或飛絡力/通用電眼Hi Pulse->Low Pulse，寬度和致能時間都正確，出獎+1")
                 analog_claw_1.Number_of_Award = meter.inc_out()
                 meter.save()
-                LCD_update_flag['Claw_Value'] = True
             else :
                 print("出表或飛絡力/通用電眼Hi Pulse->Low Pulse，寬度或致能時間不正確，不進行任何動作")
             Eyes_IROUT_last_rising_time = Eyes_IROUT_rising_time
@@ -616,10 +574,10 @@ def GPIO_Setting_Coin_and_CardReader(Is_Fault):
         GPO_Claw_Coin_EN.value(1)
         if (analog_claw_1.Error_Code_of_Machine%100) == 24:
             analog_claw_1.Error_Code_of_Machine = (analog_claw_1.Error_Code_of_Machine-24)/100
-    LCD_update_flag['Claw_State'] = True
 
 def safe_reboot():
     print("準備重開機，先關閉卡機和投幣器電源...")
+    led_mgr.set_state(RGBLEDManager.UPDATING_REBOOTING, lock=True)   # 上鎖：three_timer_task 的 LED thread 不再覆蓋白燈（關電源→sleep→reset 全程白恆亮）
     # 關掉卡機電源和刷卡功能
     GPO_CardReader_EPAY_EN.value(0)
     GPO_CardReader_PAYINOUT_EN.value(0)
@@ -663,26 +621,15 @@ load_token()
 WDT_feed_flag = 0
 wdt=WDT(timeout=1000*60*10) # 10分鐘
 
-# LCD配置
+# RGB LED 狀態燈自我初始化（開發時可不經 main.py 直接執行本檔；單例，已初始化會自動略過）
+# 失敗只印 log、不 reset（原 LCD 版失敗會 machine.reset()）；狀態燈是輔助功能，不可讓機台停業
+led_mgr = RGBLEDManager.get_instance()   # 放 try 外，確保 led_mgr 一定綁定
 try:
-    # 把st7735所有相關的模組都寫在lcd_manager
-    # 獲取 LCD 單例singleton
-    lcd_mgr = LCDManager.get_instance() 
-    # LCD單例初始化
-    lcd_mgr.initialize()
+    led_mgr.initialize()
     gc.collect()
     print(gc.mem_free())
 except Exception as e:
-    print('LCD init Error:', e)
-    machine.reset()
-
-LCD_update_flag = {
-    'Uniform': True,
-    'WiFi': False,
-    'Time': False,
-    'Claw_State': False,
-    'Claw_Value': False,
-}
+    print('RGB LED init Error:', e)
 
 print('2開機秒數:', utime.ticks_ms() / 1000)
 
@@ -745,9 +692,6 @@ try:
 except Exception as e:
     print('MachMeter init Error:', e)
     analog_claw_1.Error_Code_of_Machine = 23
-    
-LCD_update_flag['Claw_Value'] = True
-LCD_update_flag['Claw_State'] = True
 
 
 # 創建 MQTT Client 1 資料
@@ -811,4 +755,3 @@ while True:
 
         gc.collect()
         print(gc.mem_free())
-        LCD_update_flag['Time'] = True

@@ -172,3 +172,7 @@ cython_debug/
 
 # PyPI configuration file
 .pypirc
+
+# 機台個資 / 密鑰（只留本機，不進 repo）
+sourceFiles/token.dat
+sourceFiles/wifi.dat
