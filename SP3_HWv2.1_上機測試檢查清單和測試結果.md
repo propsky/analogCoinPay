@@ -1,6 +1,6 @@
 # SP3_HWv2.1 上機測試檢查清單和測試結果
 
-> 最後更新：2026-09-09 21:15
+> 最後更新：2026-09-10 22:12
 > 產出：2026-09-06 00:12　作者參考用；保留於根目錄供約半年參考，未來同類檔案變多再做資料夾分類（不隨發布刪除）。
 > 對象：LED stage2 + hostname 分流 + SW1 三包改動，於真實娃娃機上驗證。
 > 用法：每項測完自己打勾；發現異常記在該項下方。
@@ -39,7 +39,7 @@
       3. 定期重開 safe_reboot()：debug 版滿3小時整點後30分（:722-726，測時解除註解；正式版是滿3天早上3點）
       根因與修正（已生效）：three_timer_task 跑在獨立 thread，原本 safe_reboot 期間 thread 會把白燈覆蓋回
       營運狀態（沒接娃娃機→MACHINE_FAULT 紫閃）。已在 set_state 加 lock，safe_reboot 與 main.py OTA 用
-      lock=True 上鎖，白燈固定到 reset。實測三種觸發皆全程白恆亮、不再紫閃。（鎖規格見 rgb-led-spec.md 第八節）
+      lock=True 上鎖，白燈固定到 reset。實測三種觸發皆全程白恆亮、不再紫閃。（鎖規格見 SP3_HWv2.1_RGB狀態燈規格與設計決策_rgb-led-spec.md 第八節）
 - [x] **STOPPED**　SW1 停止：紅，恆亮
 
 檢查點：
@@ -149,9 +149,37 @@ UDP 設定模式：連上 Sam AP **之前**是正常水藍呼吸；**連上之�
 
 ## 4. OTA 流程（README to-be-do #4）
 
-- [ ] 舊版 → 新版 OTA：更新成功、UPDATING_REBOOTING 白恆亮、更新後 reboot
-- [ ] 新版 → 新版 OTA：無多餘更新時正確略過
-- [ ] senko 抓的 branch 是 `SP3_HWv2.1`、working_dir `releaseFiles/latestVersion`
+> 實測 2026-09-10。方法：機台維持 SP3_V0.01f，用 Thonny 在機台端把版本字串改 0.01f→0.00f、
+> 並各改 9 個檔註解 1 字元，製造「機台端 ≠ repo」，再以 MQTT `fota` 指令觸發 OTA 拉回 repo 版。
+> senko：branch `SP3_HWv2.1`、working_dir `releaseFiles/latestVersion`（log 逐次 URL 佐證）。
+
+- [x] **舊 → 新真更新**：hash 不同 → 下載 → 原子覆蓋 → reboot；含版本字串檔時 log 版本 **0.00f→0.01f 翻版**
+- [x] **新 → 新 no-op**：機台==repo 時印 `Cannot find new-changed files`、不動任何檔（冪等，多次複驗）
+- [x] **UPDATING_REBOOTING 白恆亮**：收指令重開、main.py 偵測 otalist 到刪檔重開，兩階段全程白（見第1節）
+- [x] **混合清單容錯**：清單含不存在的檔（boot.py）→ 該檔 404 略過、**不擋其他檔**更新；亂空格也被正確解析
+- [x] **更新中途真斷網**（實測意外收穫）：4 檔更新到第 3 檔時 WiFi 掉（ECONNABORTED→EHOSTUNREACH），
+      已完成的 2 檔靠 `senko.tmp` 先下載再 rename **原子保留**、失敗的 2 檔**原檔不損壞**；reboot 後仍正常開機
+- [x] **重送續傳**：重送同指令，已完成檔（hash 同）自動略過、**只補上次失敗的檔**；第三次全同步 → no-op 收斂
+- [x] **沒網 → 不 OTA**：reboot 後連不上時印 `No wifi, No OTA!!!!`、仍進主程式、稍後自愈重連
+- [x] **誤含個資/記帳檔安全**：清單誤列 token.dat/wifi.dat/meter.json → repo 無此檔 404 略過，**本機個資/記帳不被覆蓋**
+- [x] **檔案層級佐證**：OTA 後撈回機台檔，8 個受管檔 **SHA1 全 == repo**；boot.py（repo 無）保留機台版；token/wifi/meter 未動
+
+**OTA 更新結果總表：**
+
+| 測項 | 結果 |
+|---|---|
+| 舊→新（下載/原子覆蓋/reboot/版本翻版） | ✅ |
+| 新→新（冪等 no-op） | ✅ |
+| 混合清單：不存在檔 404 不擋其他 | ✅ |
+| 更新中途斷網：完成檔保留、失敗檔不壞 | ✅ |
+| 重送續傳：只補失敗檔、最終收斂 no-op | ✅ |
+| 沒網→跳過 OTA→仍開機→自愈重連 | ✅ |
+| 誤含個資/記帳檔→安全略過不覆蓋 | ✅ |
+| 檔案 SHA1 == repo（8 檔）、boot.py 保留 | ✅ |
+
+> **運維準則（重要）**：senko 逐檔原子覆蓋、**檔與檔之間無交易性**——中途斷網會停在「部分新、部分舊」的混合狀態。
+> 這次因改動只是註解仍能開機，但**真實跨檔大改版時，混合狀態可能不相容**。
+> 對策：**OTA 後重送同指令，直到回報 `Cannot find new-changed files`（no-op），才代表所有檔已同步完成**。
 
 ---
 
@@ -168,12 +196,12 @@ UDP 設定模式：連上 Sam AP **之前**是正常水藍呼吸；**連上之�
 
 ## 6. 收尾 / 發布前
 
-> 本次為 **OTA 測試發布 SP3_V0.01f**（供測「SP3_V0.01a → SP3_V0.01f」OTA）；待 OTA 驗證通過後定版 **SP3_0.31a**，屆時版號相關項目需再跑一次。
+> OTA 已於 2026-09-10 驗證通過（見第 4 節），正式定版 **SP3_V0.31a**（程式碼同 OTA 測試碼 SP3_V0.01f，僅差版本字串與兩處註解、無行為變更）。
 
-- [ ] 程式版本字串（analogCoinPay_Main.py 第 1 行）定案：目前 SP3_V0.01f（OTA 測試碼），最終 SP3_0.31a 待 OTA 測完定案
-- [x] README / CLAUDE.md 版本號與硬體描述同步（GPIO27→WS2812、移除 LCD）：已同步（版號暫記 SP3_V0.01f、最終 SP3_0.31a）
+- [x] 程式版本字串（analogCoinPay_Main.py 第 1 行）定案：已定版 SP3_V0.31a（程式碼同 OTA 測試碼 SP3_V0.01f，僅差版本字串與兩處註解、無行為變更）
+- [x] README / CLAUDE.md 版本號與硬體描述同步（GPIO27→WS2812、移除 LCD）：已同步為定版 SP3_V0.31a
 - [x] sourceFiles/ → releaseFiles/latestVersion/ 覆蓋：兩邊程式碼一致（排除 token.dat/wifi.dat、已刪 lcd_manager、已加 rgb_led_manager）
-- [x] releaseFiles/ 建立版本 zip：SP3_V0.01f.zip
-- [x] README code-change list 補這版紀錄：SP3_V0.01f 條目（含檔案 rename、.gitattributes、token/wifi 移出追蹤）
-- [ ] 三包 commit（message 先給 Thomas 確認）：message 已確認，push 進行中
+- [x] releaseFiles/ 建立版本 zip：SP3_V0.01f.zip、SP3_V0.31a.zip
+- [x] README code-change list 補這版紀錄：SP3_V0.01f 條目（含檔案 rename、.gitattributes、token/wifi 移出追蹤）、SP3_V0.31a 定版條目
+- [x] commit（message 先給 Thomas 確認）：SP3_V0.01f 已 commit c052206 並 push；SP3_V0.31a 定版 commit 即本次發布
 - 本檔保留於根目錄供約半年參考，不隨發布刪除；未來同類檔案變多再做資料夾分類。

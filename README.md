@@ -4,6 +4,25 @@
 
 # code-change list
 
+**2026/9/10_SP3_V0.31a, Thomas**  
+1. analogCoinPay_Main.py 第1行版本字串 SP3_V0.01f → SP3_V0.31a（定版）  
+a. 跳號原因：SP3 為相容官方/舊雙韌體，改了不少 SP2_V0.30b 沒有的東西，定版跳到 SP3_V0.31a 與 SP2 版號對齊  
+b. 本檔相對 SP3_V0.01f 僅此版本字串一行不同、無行為變更（SP3_V0.01f 為 OTA 測試碼，SP3_V0.31a 為正式定版）  
+2. rgb_led_manager.py  
+a. 狀態常數註解「九種」更正為「十種」（無行為變更）  
+3. main.py  
+a. GPIO27 註解補充此腳於 led_mgr.initialize() 初始化（無行為變更）  
+4. SP3_HWv2.1_上機測試檢查清單和測試結果.md  
+a. 第 4 節補上 OTA 流程實機驗證結果與運維準則：舊→新真更新、新→新 no-op、混合清單容錯、更新中途斷網續傳、誤含個資/記帳檔安全略過、檔案 SHA1 == repo 等全數通過  
+b. 第 6 節版本字串定案項更新為「已定版 SP3_V0.31a」  
+c. 將文中版本號 SP3_0.31a 補 V 改為 SP3_V0.31a  
+d. 內文引用的「rgb-led-spec.md」改為全名 SP3_HWv2.1_RGB狀態燈規格與設計決策_rgb-led-spec.md  
+5. SP3_HWv2.1_RGB狀態燈規格與設計決策_rgb-led-spec.md  
+a. 第九節修正舊檔名與「收尾後會刪」的誤述（SP3_HWv2.1_上機測試檢查清單和測試結果.md 已改名並保留約半年參考）  
+b. 更新文內「最後更新」日期  
+* Based on smartpay3 2026/9/9_SP3_V0.01f, Thomas  
+---
+
 **2026/9/9_SP3_V0.01f, Thomas**  
 1. 新增 rgb_led_manager.py（WS2812 單顆狀態燈，取代 LCD）  
 a. 以單顆 WS2812（GPIO27，原 LCD_EN 背光腳）顯示系統狀態，共十種燈號  
@@ -94,7 +113,7 @@ b. 在覆蓋檔案前先備份，並且main.py，可以執行xxxbackup.py
         for file in important_files:
             os.rename(file, file + '.backup')
 
-4. 確認OTA以下更新方式是否正常合理  
+4. 每次發版時都要確認OTA以下更新方式是否正常合理  
 a. 舊->新  
 b. 新->新
 
@@ -150,7 +169,7 @@ c. 開機 LED 狀態燈會「短暫倒退」：實機觀察到開機燈號序列
     - 方案 C：維持現狀。優點：零風險；缺點：倒退與短暫失真仍在。  
       目前（硬體驗證期）先採 C，待 #1 一起做時改 A。
 
-7. 【SP3_0.31a（開發碼 SP3_0.01f）與 SP2_V0.30b 的「共用碼」實際差異——  
+7. 【SP3_V0.31a（開發碼 SP3_V0.01f）與 SP2_V0.30b 的「共用碼」實際差異——  
    放這裡提醒 SP2 下一版優先補齊此部分，補齊後 SP2_V0.30b 進版為 SP2_V0.31a。  
    兩項皆與硬體差異無關】  
 
@@ -171,7 +190,7 @@ b. SW1 開機停止方式：SP3 已把 main.py 的 sys.exit() 改為 raise Keybo
     (v1.29 與 1.18.9 皆實測) 都會乾淨掉到 REPL，且此寫法兩韌體通用、不需分支。  
     SP2 為減少程式碼分歧可直接採用（舊韌體 sys.exit() 也能用，此寫法兩韌體通用、行為不變）。  
 
-c. 新增 .gitattributes（強制 *.py / *.json / *.md 為 LF）：SP2_V0.30b 進版到 SP2_0.31a 時也要一併做，確保 GitHub 上只有 LF、不含 CRLF 檔案格式。
+c. 新增 .gitattributes（強制 *.py / *.json / *.md 為 LF）：SP2_V0.30b 進版到 SP2_V0.31a 時也要一併做，確保 GitHub 上只有 LF、不含 CRLF 檔案格式。
 
 d. 將 token.dat / wifi.dat 移出版本控制（git rm --cached ＋ 加 .gitignore）：SP2_V0.30b 也把機台 wifi 密碼與 token 只留本機、不進 repo。
 

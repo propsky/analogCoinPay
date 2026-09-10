@@ -11,7 +11,7 @@ ESP32 Smart Pay Board 2024 - MicroPython-based payment system for claw machines 
 **Hardware**: ESP32 microcontroller  
 **Language**: MicroPython  
 **Firmware**: 官方 MicroPython v1.29.0（SP3 第一版改用官方韌體，取代原廠商客製 v1.18.9；評估見 SP3_韌體評估_目標v1.29.pdf）  
-**Current Version**: 開發碼 SP3_V0.01f（測試/OTA 用）；硬體驗證收尾後定版為 SP3_0.31a  
+**Current Version**: SP3_V0.31a（正式定版）；程式碼同開發/OTA 測試碼 SP3_V0.01f，僅差版本字串與兩處註解（無行為變更）  
 **Main Branch**: main（僅存放版本與 branch 索引，不含程式碼）  
 **Development Branch**: SP3_HWv2.1
 
@@ -22,7 +22,7 @@ ESP32 Smart Pay Board 2024 - MicroPython-based payment system for claw machines 
 - **analogCoinPay_Main.py**: Main business logic, MQTT communication, state machine, hardware control
 - **main.py**: System initialization, GPIO setup, WiFi connection, emergency stop handling
 - **wifimgr.py**: WiFi management, AP mode configuration, web interface for WiFi setup
-- **rgb_led_manager.py**: WS2812 單顆狀態燈（GPIO27，取代原 LCD）；規格與設計理由見 rgb-led-spec.md
+- **rgb_led_manager.py**: WS2812 單顆狀態燈（GPIO27，取代原 LCD）；規格與設計理由見 SP3_HWv2.1_RGB狀態燈規格與設計決策_rgb-led-spec.md
 - **config.json**: System configuration (boot delay, etc.)
 - **Hardware Drivers**: BN165DKBDriver.py (keypad), mach_meter.py (counters)
 
@@ -141,16 +141,16 @@ Dual-mode operation:
 └── README.md              # Version history and todo list
 ```
 
-## Recent Changes（RGB LED 版，開發碼 SP3_V0.01f；收尾後定版 SP3_0.31a）
+## Recent Changes（RGB LED 版，SP3_V0.31a 定版）
 
 自 SP2_HWv1 的 SP2_V0.30b 拷貝建立 SP3 產品線（baseline＝SP3_V0.01a），之後在本 branch 上完成：
 
-1. **RGB LED 狀態燈**：移除 LCD（刪除 lcd_manager.py），新增 rgb_led_manager.py 以單顆 WS2812（GPIO27）顯示系統狀態。十種燈號、被動式 tick 設計、狀態鎖（`set_state` 的 `lock` 參數）等規格見 rgb-led-spec.md。
+1. **RGB LED 狀態燈**：移除 LCD（刪除 lcd_manager.py），新增 rgb_led_manager.py 以單顆 WS2812（GPIO27）顯示系統狀態。十種燈號、被動式 tick 設計、狀態鎖（`set_state` 的 `lock` 參數）等規格見 SP3_HWv2.1_RGB狀態燈規格與設計決策_rgb-led-spec.md。
 2. **韌體改官方 v1.29.0**：取代原廠商客製 v1.18.9（已棄養）；相容性/決策評估見 SP3_韌體評估_目標v1.29.pdf。
 3. **DHCP 主機名分流**：wifimgr 依韌體自動選 API（新韌體 network.hostname()、舊韌體 dhcp_hostname），並在連線前一刻設定，確保後台顯示 SmartPay_xxxx。
 4. **SW1 停止**：main.py 由 sys.exit() 改為 raise KeyboardInterrupt（避免 v1.29 的 soft-reset 迴圈；兩韌體通用）。
 
-版號 SP3_V0.01a 起逐版遞增（開發中每次下載跳尾碼以確認最新），目前開發碼 SP3_V0.01f。燈號、中斷完整性、記帳(IN/EPAY/OUT)、故障/電源、斷網、meter 持久化、長時間穩定度皆已實機驗證；剩 OTA 流程待測。收尾後定版為 SP3_0.31a。
+版號 SP3_V0.01a 起逐版遞增（開發中每次下載跳尾碼以確認最新），開發/OTA 測試碼為 SP3_V0.01f，正式定版 SP3_V0.31a（相對 SP3_V0.01f 僅差版本字串與兩處註解、無行為變更）。燈號、中斷完整性、記帳(IN/EPAY/OUT)、故障/電源、斷網、meter 持久化、長時間穩定度、OTA 流程皆已實機驗證通過。
 
 ## Hardware Dependencies
 

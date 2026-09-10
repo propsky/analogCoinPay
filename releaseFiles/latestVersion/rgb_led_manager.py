@@ -17,7 +17,7 @@ class RGBLEDManager:
 
     _instance = None
 
-    # ===== 九種狀態常數（用法：RGBLEDManager.RUNNING）=====
+    # ===== 十種狀態常數（用法：RGBLEDManager.RUNNING）=====
     BOOT_TEST     = 'BOOT_TEST'      # 上電自檢：紅->綠->藍，由 boot_test() 阻塞執行
     BOOTING       = 'BOOTING'        # 開機中：白，呼吸，週期 2000ms
     WIFI_CONFIG   = 'WIFI_CONFIG'    # Wi-Fi 設定模式：水藍，呼吸，週期 1000ms

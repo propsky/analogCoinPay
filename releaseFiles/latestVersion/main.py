@@ -30,7 +30,7 @@ PL = Pin(32, Pin.OUT)
 Q7 = Pin(33, Pin.IN)
 ESP32_TXD2_FEILOLI = Pin(17, Pin.IN)
 
-# GPIO27 原為 LCD_EN 背光致能；SP3 移除 LCD 後，此腳改給 WS2812 狀態燈（見 rgb_led_manager）
+# GPIO27 原為 LCD_EN 背光致能；SP3 移除 LCD 後，此腳改給 WS2812 狀態燈，於下方 led_mgr.initialize() 初始化（見 rgb_led_manager）
 
 # 取得 RGB LED 單例並初始化：先跑上電自檢(紅→綠→藍)，再進入開機中(白呼吸)
 led_mgr = RGBLEDManager.get_instance()
